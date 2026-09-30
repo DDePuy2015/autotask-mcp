@@ -4,10 +4,10 @@ on:
   pull_request:
     branches: [main]
 
-# Fork guard: this caller is PR-only and read-only in DDePuy2015/autotask-mcp.
-# The reusable workflow's release, GHCR, GitHub Release, MCP Registry, and
-# security jobs remain unreachable because there is no main-push trigger and
-# this caller grants only contents/packages read permission.
+# Fork guard: do not instantiate the inherited release caller in
+# DDePuy2015/autotask-mcp. PR verification remains in test.yml and the fork
+# container-validation workflow; this file must not request release, GHCR,
+# GitHub Release, MCP Registry, security, or OIDC capabilities.
 
 # Thin caller for the canonical reusable release pipeline. The build →
 # semantic-release → Docker → MCP Registry → security chain (tag-based release
@@ -18,7 +18,7 @@ on:
 # only reduce, never expand, caller-granted scope).
 jobs:
   release:
-    if: github.event_name == 'pull_request' && github.repository == 'DDePuy2015/autotask-mcp'
+    if: ${{ false }}
     permissions:
       contents: read
       packages: read
@@ -45,7 +45,6 @@ jobs:
       # never add `npm install -g` — npm's self-update under emulation is the
       # difference between a ~2 minute and a 60+ minute build.
       platforms: linux/amd64,linux/arm64
-    secrets: inherit
 
   # DEPLOY TEMPORARILY DISABLED (2026-08-25 org migration fleet wave).
   #
