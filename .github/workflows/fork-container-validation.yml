@@ -83,10 +83,12 @@ jobs:
         run: |
           set -euo pipefail
           image="autotask-mcp:pr-${{ github.event.pull_request.number }}"
-          platform="$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')"
-          test "$platform" = 'linux/amd64'
-          command="$(docker image inspect "$image" --format '{{json .Config.Cmd}}')"
-          test "$command" = '["node","dist/index.js"]'
-          entrypoint="$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')"
-          test "$entrypoint" = '[]' || test "$entrypoint" = 'null'
-          echo "Validated $image: $platform, Cmd=$command, Entrypoint=$entrypoint"
+          metadata="$(docker image inspect "$image")"
+          echo "$metadata" | jq '.[0] | {os, architecture, cmd: .Config.Cmd, entrypoint: .Config.Entrypoint}'
+          echo "$metadata" | jq -e '
+            .[0]
+            | .Os == "linux"
+              and .Architecture == "amd64"
+              and .Config.Cmd == ["node", "dist/index.js"]
+              and (.Config.Entrypoint == null or .Config.Entrypoint == [])
+          '
