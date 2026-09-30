@@ -1,0 +1,95 @@
+name: Fork Container Validation
+
+# PR-only validation for DDePuy2015/autotask-mcp. This deliberately does not
+# call the upstream release workflow, publish to the MCP Registry, create a
+# GitHub release, or push an image.
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: Validate linux/amd64 fork image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Verify source pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$EXPECTED_SHA"
+          echo "Validated source commit: $actual_sha"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure legacy SDK scope
+        run: npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Lint destructive tool warnings
+        run: node scripts/lint-destructive-warnings.mjs src
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build image without pushing
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: autotask-mcp:pr-${{ github.event.pull_request.number }}
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            COMMIT_SHA=${{ github.event.pull_request.head.sha }}
+            BUILD_DATE=${{ github.run_started_at }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/DDePuy2015/autotask-mcp
+            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
+
+      - name: Verify image architecture and command
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="autotask-mcp:pr-${{ github.event.pull_request.number }}"
+          metadata="$(docker image inspect "$image")"
+          echo "$metadata" | jq '.[0] | {cmd: .Config.Cmd, entrypoint: .Config.Entrypoint}'
+          echo "$metadata" | jq -e '
+            .[0]
+            | .Config.Cmd == ["node", "dist/index.js"]
+              and .Config.Entrypoint == ["docker-entrypoint.sh"]
+          '
+          runtime="$(docker run --rm --platform linux/amd64 --entrypoint node "$image" -e 'console.log(process.platform + "/" + process.arch)')"
+          test "$runtime" = 'linux/x64'
+          echo "Validated $image: runtime=$runtime, Cmd=node dist/index.js, Entrypoint=docker-entrypoint.sh"

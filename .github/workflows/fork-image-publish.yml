@@ -1,0 +1,113 @@
+name: Fork Image Publish (GHCR only)
+
+# This workflow is intentionally manual and is not part of PR validation.
+# Merge and dispatch require separate operator approval because this job has
+# packages: write. It has no release, tag, npm-publish, MCP Registry, OIDC,
+# or deployment step.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: '40-character commit SHA to build exactly'
+        required: true
+        type: string
+      image_tag:
+        description: 'Immutable image tag, for example sha-<commit>'
+        required: true
+        type: string
+      confirm_publish:
+        description: 'Type PUBLISH_DDEPUY2015_AUTOTASK_MCP to enable GHCR push'
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Build and push linux/amd64 image to fork GHCR
+    if: inputs.confirm_publish == 'PUBLISH_DDEPUY2015_AUTOTASK_MCP'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE: ghcr.io/ddepuy2015/autotask-mcp
+
+    steps:
+      - name: Validate immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]
+
+      - name: Checkout exact source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify source pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          echo "Building source commit: $actual_sha"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.x'
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+
+      - name: Configure legacy SDK scope
+        run: npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run validation gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint
+          node scripts/lint-destructive-warnings.mjs src
+          npm run build
+          npm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to fork GHCR namespace
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable linux/amd64 image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+            COMMIT_SHA=${{ env.SOURCE_SHA }}
+            BUILD_DATE=${{ github.run_started_at }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/DDePuy2015/autotask-mcp
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+
+      - name: Report immutable digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Published reference: $IMAGE:$IMAGE_TAG"
+          echo "Published digest: ${{ steps.build.outputs.digest }}"
