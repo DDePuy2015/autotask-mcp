@@ -88,5 +88,5 @@ jobs:
           command="$(docker image inspect "$image" --format '{{json .Config.Cmd}}')"
           test "$command" = '["node","dist/index.js"]'
           entrypoint="$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')"
-          test "$entrypoint" = 'null'
+          test "$entrypoint" = '[]' || test "$entrypoint" = 'null'
           echo "Validated $image: $platform, Cmd=$command, Entrypoint=$entrypoint"
