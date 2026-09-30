@@ -1,10 +1,13 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+
+# Fork guard: this caller is PR-only and read-only in DDePuy2015/autotask-mcp.
+# The reusable workflow's release, GHCR, GitHub Release, MCP Registry, and
+# security jobs remain unreachable because there is no main-push trigger and
+# this caller grants only contents/packages read permission.
 
 # Thin caller for the canonical reusable release pipeline. The build →
 # semantic-release → Docker → MCP Registry → security chain (tag-based release
@@ -15,13 +18,10 @@ on:
 # only reduce, never expand, caller-granted scope).
 jobs:
   release:
+    if: github.event_name == 'pull_request' && github.repository == 'DDePuy2015/autotask-mcp'
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write  # required by reusable release job: @semantic-release/github success step reads/comments on associated PRs
-      packages: write
-      id-token: write
-      security-events: write
+      contents: read
+      packages: read
     # Pin includes the `mcpb` job (WYRE-AI/.github#43), which restores
     # packing + attaching autotask-mcp.mcpb to the GitHub release. That step
     # existed in this repo's hand-rolled workflow and was dropped by the
