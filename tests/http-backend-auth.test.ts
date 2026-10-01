@@ -110,6 +110,7 @@ describe('HTTP proxy-to-provider authentication', () => {
     const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: 'POST',
       headers: {
+        accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
         'x-summit-autotask-backend-token': 'backend-secret',
       },
