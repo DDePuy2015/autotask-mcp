@@ -9,6 +9,11 @@ import worker, { type Env } from '../src/worker.js';
 const MCP_HEADERS = {
   Accept: 'application/json, text/event-stream',
   'Content-Type': 'application/json',
+  'X-Summit-Autotask-Backend-Token': 'backend-secret',
+};
+
+const DEFAULT_ENV: Env = {
+  AUTOTASK_BACKEND_TOKEN: 'backend-secret',
 };
 
 /**
@@ -40,7 +45,7 @@ async function mcp(
       headers: { ...MCP_HEADERS, ...extraHeaders },
       body: JSON.stringify(body),
     }),
-    env
+    { ...DEFAULT_ENV, ...env }
   );
 }
 
@@ -62,6 +67,68 @@ describe('Cloudflare Worker entrypoint', () => {
     );
     expect(res.status).toBe(204);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+
+  it('reports readiness only when the backend token is configured', async () => {
+    const notReady = await worker.fetch(
+      new Request('http://worker.local/ready'),
+      {},
+    );
+    expect(notReady.status).toBe(503);
+
+    const ready = await worker.fetch(
+      new Request('http://worker.local/ready'),
+      DEFAULT_ENV,
+    );
+    expect(ready.status).toBe(200);
+  });
+
+  it('keeps health open while backend authentication is unavailable', async () => {
+    const res = await worker.fetch(
+      new Request('http://worker.local/health'),
+      {},
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects MCP requests when the backend token is missing', async () => {
+    const res = await mcp(
+      {
+        jsonrpc: '2.0',
+        id: 10,
+        method: 'initialize',
+        params: {},
+      },
+      { AUTOTASK_BACKEND_TOKEN: '' },
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it('rejects MCP requests with an invalid backend token', async () => {
+    const res = await mcp(
+      {
+        jsonrpc: '2.0',
+        id: 11,
+        method: 'initialize',
+        params: {},
+      },
+      {},
+      { 'X-Summit-Autotask-Backend-Token': 'wrong-token' },
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('preserves optional gateway HMAC enforcement on the Worker entrypoint', async () => {
+    const res = await mcp(
+      {
+        jsonrpc: '2.0',
+        id: 12,
+        method: 'initialize',
+        params: {},
+      },
+      { CONDUIT_S2S_SECRET: 'hmac-secret' },
+    );
+    expect(res.status).toBe(401);
   });
 
   it('404s unknown paths', async () => {

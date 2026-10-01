@@ -35,6 +35,11 @@ import {
   parseCredentialsFromHeaders,
 } from './utils/config.js';
 import type { McpServerConfig } from './types/mcp.js';
+import {
+  AUTOTASK_BACKEND_TOKEN_HEADER,
+  validateBackendToken,
+} from './mcp/backend-auth.js';
+import { S2S_HEADER, verifyS2sHeader } from './mcp/s2s-verify.js';
 
 export interface Env {
   AUTOTASK_USERNAME?: string;
@@ -45,13 +50,15 @@ export interface Env {
   LOG_LEVEL?: string;
   LOG_FORMAT?: string;
   LAZY_LOADING?: string;
+  AUTOTASK_BACKEND_TOKEN?: string;
+  CONDUIT_S2S_SECRET?: string;
 }
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers':
-    'Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, X-API-Key, X-API-Secret, X-Integration-Code, X-API-Url, X-Impersonation-Resource-Id',
+    'Content-Type, Accept, Authorization, Mcp-Session-Id, MCP-Protocol-Version, X-API-Key, X-API-Secret, X-Integration-Code, X-API-Url, X-Impersonation-Resource-Id, X-Summit-Autotask-Backend-Token',
   'Access-Control-Expose-Headers': 'Mcp-Session-Id',
 };
 
@@ -151,7 +158,44 @@ export default {
       });
     }
 
+    if (url.pathname === '/ready') {
+      const ready = Boolean(env.AUTOTASK_BACKEND_TOKEN);
+      return json({ status: ready ? 'ready' : 'not_ready' }, ready ? 200 : 503);
+    }
+
     if (url.pathname === '/mcp') {
+      if (
+        env.CONDUIT_S2S_SECRET &&
+        !verifyS2sHeader(
+          request.headers.get(S2S_HEADER) ?? undefined,
+          env.CONDUIT_S2S_SECRET,
+        )
+      ) {
+        return json(
+          {
+            error:
+              'Missing or invalid X-Gateway-S2S header: this endpoint only accepts requests signed by the gateway.',
+          },
+          401,
+        );
+      }
+
+      const backendAuthFailure = validateBackendToken(
+        env.AUTOTASK_BACKEND_TOKEN,
+        request.headers.get(AUTOTASK_BACKEND_TOKEN_HEADER) ?? undefined,
+      );
+      if (backendAuthFailure) {
+        return json(
+          {
+            error:
+              backendAuthFailure === 'not_configured'
+                ? 'Backend authentication is not configured.'
+                : 'Backend authentication failed.',
+          },
+          backendAuthFailure === 'not_configured' ? 503 : 401,
+        );
+      }
+
       const isGatewayMode = (env.AUTH_MODE ?? 'env') === 'gateway';
 
       if (isGatewayMode) {
@@ -182,6 +226,6 @@ export default {
       return withCors(response);
     }
 
-    return json({ error: 'Not found', endpoints: ['/mcp', '/health'] }, 404);
+    return json({ error: 'Not found', endpoints: ['/mcp', '/health', '/ready'] }, 404);
   },
 };
