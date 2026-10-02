@@ -73,6 +73,12 @@ test('local build callers use the same secret mount', () => {
   assert.match(read('DOCKER_USAGE.md'), /separate activation approval/);
 });
 
+test('inherited MCP assertions use the pinned app runtime, not their default', () => {
+  const expected = read('.nvmrc').trim();
+  assert.ok(read('.github/workflows/mcp-assert.yml').includes(`node-version: '${expected}'`));
+  assert.match(read('.gitignore'), /^tag-check-error\.txt$/m);
+});
+
 test('valid single-platform and mapped BuildKit predicates are accepted', () => {
   assert.equal(verifyProvenance(fixture(), sha).buildType, fixture().buildType);
   assert.equal(verifyProvenance({ 'linux/amd64': fixture() }, sha).buildType, fixture().buildType);
