@@ -71,7 +71,7 @@
     "vite-plugin-singlefile": "^2.1.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.23.1 <23"
   },
   "overrides": {
     "@isaacs/brace-expansion": "^5.0.1",

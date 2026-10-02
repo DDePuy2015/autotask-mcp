@@ -158,8 +158,12 @@ fi
 
 # Test Docker build if Docker is available
 if command_exists docker; then
+    if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+        print_error "Set the existing package-read NODE_AUTH_TOKEN before the local Docker build"
+        exit 1
+    fi
     print_status "Testing Docker build..."
-    if docker build -t autotask-mcp:test .; then
+    if docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:test .; then
         print_success "Docker build test passed"
         
         # Clean up test image
@@ -205,4 +209,5 @@ echo ""
 print_status "Manual release commands:"
 echo "  - Create GitHub release: gh release create v$CURRENT_VERSION"
 echo "  - Publish to NPM: npm publish"
-echo "  - Build and push Docker: docker build -t WYRE-AI/autotask-mcp:latest . && docker push WYRE-AI/autotask-mcp:latest" 
+echo "  - Local Docker validation: docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:test ."
+echo "  - Summit publication: separately approved Fork Image Publish workflow; do not push local images or mutable tags"

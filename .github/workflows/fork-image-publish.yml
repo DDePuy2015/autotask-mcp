@@ -1,83 +1,80 @@
 name: Fork Image Publish (GHCR only)
 
-# This workflow is intentionally manual and is not part of PR validation.
-# Merge and dispatch require separate operator approval because this job has
-# packages: write. It has no release, tag, npm-publish, MCP Registry, OIDC,
-# or deployment step.
+# DRAFT: keyless signing needs id-token: write in publish.
+# Merge/activation and dispatch each require separate operator approval.
+# No Azure login, deployment, federation, release, npm or MCP Registry writes.
 on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: '40-character commit SHA to build exactly'
+        description: Exact merged main commit (40-character SHA)
         required: true
         type: string
       image_tag:
-        description: 'Immutable image tag, for example sha-<commit>'
+        description: Unique sha-<full-commit> tag, optionally suffixed -r<run-number>
         required: true
         type: string
       confirm_publish:
-        description: 'Type PUBLISH_DDEPUY2015_AUTOTASK_MCP to enable GHCR push'
+        description: Type PUBLISH_DDEPUY2015_AUTOTASK_MCP to enable GHCR push and keyless signing
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
+  controls:
+    if: ${{ github.repository == 'DDePuy2015/autotask-mcp' && github.ref == 'refs/heads/main' && inputs.confirm_publish == 'PUBLISH_DDEPUY2015_AUTOTASK_MCP' }}
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: read
+    uses: ./.github/workflows/fork-container-validation.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+
   publish:
-    name: Build and push linux/amd64 image to fork GHCR
-    if: inputs.confirm_publish == 'PUBLISH_DDEPUY2015_AUTOTASK_MCP'
+    name: Publish, scan, sign and verify exact GHCR digest
+    needs: controls
+    if: ${{ github.repository == 'DDePuy2015/autotask-mcp' && github.ref == 'refs/heads/main' && inputs.confirm_publish == 'PUBLISH_DDEPUY2015_AUTOTASK_MCP' && needs.controls.result == 'success' }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: autotask-fork-ghcr-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
+      # NEW: Sigstore only. Not Azure federation or deployment authority.
+      id-token: write
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
       IMAGE_TAG: ${{ inputs.image_tag }}
-      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       IMAGE: ghcr.io/ddepuy2015/autotask-mcp
 
     steps:
-      - name: Validate immutable inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9._-]+$ ]]
-
-      - name: Checkout exact source commit
+      - name: Checkout validated source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify source pin
-        shell: bash
+      - name: Verify merged source and commit-derived tag syntax
+        env:
+          VALIDATED_SHA: ${{ needs.controls.outputs.source_sha }}
         run: |
           set -euo pipefail
-          actual_sha="$(git rev-parse HEAD)"
-          test "$actual_sha" = "$SOURCE_SHA"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$IMAGE_TAG" =~ ^sha-$SOURCE_SHA(-r[0-9]+)?$ ]]
+          test "$SOURCE_SHA" = "$VALIDATED_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
-          echo "Building source commit: $actual_sha"
 
-      - name: Set up Node.js
+      - name: Set up pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.x'
-          cache: npm
-          registry-url: https://npm.pkg.github.com
-
-      - name: Configure legacy SDK scope
-        run: npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Run validation gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run lint
-          node scripts/lint-destructive-warnings.mjs src
-          npm run build
-          npm test
+          node-version-file: .nvmrc
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -89,7 +86,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push immutable linux/amd64 image
+      - name: Refuse tag reuse or ambiguous registry errors
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" >/dev/null 2>tag-check-error.txt; then
+            echo 'Refusing to overwrite an existing tag'; exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|not found|404' tag-check-error.txt; then
+            echo 'Registry absence could not be verified'; exit 1
+          fi
+
+      - name: Build date
+        id: date
+        run: echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push exact linux/amd64 image with provenance and SBOM
         id: build
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
@@ -97,17 +108,105 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          provenance: mode=max,version=v0.2
+          sbom: true
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
             COMMIT_SHA=${{ env.SOURCE_SHA }}
-            BUILD_DATE=${{ github.run_started_at }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/DDePuy2015/autotask-mcp
-            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            BUILD_DATE=${{ steps.date.outputs.utc }}
 
-      - name: Report immutable digest
-        shell: bash
+      - name: Scan published digest
+        id: scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: json
+          output: published-scan.json
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Retain only sanitized published scan metadata
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        run: node scripts/release-checks.mjs scan-summary published-scan.json published-scan-summary.json
+
+      - name: Upload sanitized published scan evidence
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: published-scan-${{ env.SOURCE_SHA }}-${{ github.run_id }}
+          path: published-scan-summary.json
+          if-no-files-found: error
+
+      - name: Enforce published scan policy
+        if: ${{ steps.scan.outcome != 'success' }}
+        run: exit 1
+
+      - name: Generate exact registry image CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: image-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Retrieve and validate BuildKit maximum provenance
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
-          echo "Published reference: $IMAGE:$IMAGE_TAG"
-          echo "Published digest: ${{ steps.build.outputs.digest }}"
+          docker buildx imagetools inspect "$IMAGE_REF" --format '{{json .Provenance.SLSA}}' > buildkit-provenance.json
+          node scripts/release-checks.mjs provenance buildkit-provenance.json verified-provenance.json
+
+      - name: Install checksum-verified Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+
+      - name: Sign digest and attest CycloneDX and validated BuildKit provenance
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$IMAGE_REF"
+          cosign attest --yes --predicate image-sbom.cdx.json --type cyclonedx "$IMAGE_REF"
+          cosign attest --yes --predicate verified-provenance.json --type slsaprovenance "$IMAGE_REF"
+
+      - name: Verify exact workflow identity, issuer, digest and attestations
+        env:
+          IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          identity="https://github.com/DDePuy2015/autotask-mcp/.github/workflows/fork-image-publish.yml@refs/heads/main"
+          issuer=https://token.actions.githubusercontent.com
+          cosign verify "$IMAGE_REF" --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > signature-verification.json
+          cosign verify-attestation "$IMAGE_REF" --type cyclonedx --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > sbom-verification.json
+          cosign verify-attestation "$IMAGE_REF" --type slsaprovenance --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > provenance-verification.json
+
+      - name: Record immutable release evidence
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            import { BASE_DIGEST } from "./scripts/release-checks.mjs";
+            if (!/^sha256:[0-9a-f]{64}$/.test(process.env.DIGEST)) process.exit(1);
+            writeFileSync("image-metadata.json", JSON.stringify({ source: process.env.SOURCE_SHA,
+              image: process.env.IMAGE, tag: process.env.IMAGE_TAG, digest: process.env.DIGEST,
+              baseDigest: BASE_DIGEST, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID,
+              platform: "linux/amd64", signatureVerified: true, sbomVerified: true, provenanceVerified: true }, null, 2));'
+
+      - name: Retain immutable release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-metadata-${{ env.SOURCE_SHA }}-${{ github.run_id }}
+          path: |
+            image-metadata.json
+            image-sbom.cdx.json
+            verified-provenance.json
+            signature-verification.json
+            sbom-verification.json
+            provenance-verification.json
+          if-no-files-found: error
