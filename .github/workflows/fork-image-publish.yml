@@ -172,18 +172,21 @@ jobs:
           set -euo pipefail
           cosign sign --yes "$IMAGE_REF"
           cosign attest --yes --predicate image-sbom.cdx.json --type cyclonedx "$IMAGE_REF"
-          cosign attest --yes --predicate verified-provenance.json --type slsaprovenance "$IMAGE_REF"
+          # The canonical URI preserves BuildKit metadata extensions as raw JSON.
+          cosign attest --yes --predicate verified-provenance.json --type https://slsa.dev/provenance/v0.2 "$IMAGE_REF"
 
       - name: Verify exact workflow identity, issuer, digest and attestations
         env:
           IMAGE_REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           identity="https://github.com/DDePuy2015/autotask-mcp/.github/workflows/fork-image-publish.yml@refs/heads/main"
           issuer=https://token.actions.githubusercontent.com
           cosign verify "$IMAGE_REF" --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > signature-verification.json
           cosign verify-attestation "$IMAGE_REF" --type cyclonedx --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > sbom-verification.json
-          cosign verify-attestation "$IMAGE_REF" --type slsaprovenance --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > provenance-verification.json
+          cosign verify-attestation "$IMAGE_REF" --type https://slsa.dev/provenance/v0.2 --certificate-identity "$identity" --certificate-oidc-issuer "$issuer" > provenance-verification.json
+          node scripts/release-checks.mjs signed-provenance provenance-verification.json verified-provenance.json
 
       - name: Record immutable release evidence
         env:

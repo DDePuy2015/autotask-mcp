@@ -32,7 +32,11 @@ only write path is a separately approved manual dispatch from `main` with:
 
 It records the source, base digest, run, pushed digest, sanitized scans,
 CycloneDX SBOM, maximum-mode BuildKit provenance, and verified keyless
-signature/attestations. A pushed but failed/unverified image is not deployable;
+signature/attestations. The provenance predicate uses its canonical URI to preserve BuildKit source
+extensions. After cryptographic verification, decoded signed content must
+still match the reviewed source, base and exact image digest before the
+release record can claim provenance verification.
+A pushed but failed/unverified image is not deployable;
 do not overwrite its tag or treat publication as successful. The known
 single-operator model is not independent reviewer enforcement.
 

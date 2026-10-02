@@ -1,16 +1,28 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { BASE_DIGEST, REPOSITORY, summarizeScan, verifyProvenance, verifyRuntime } from '../scripts/release-checks.mjs';
+import { BASE_DIGEST, PROVENANCE_TYPE, REPOSITORY, summarizeScan, verifyProvenance, verifyRuntime, verifySignedProvenance } from '../scripts/release-checks.mjs';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const sha = '1'.repeat(40);
+const digest = `sha256:${'a'.repeat(64)}`;
 const fixture = () => ({
   buildType: 'https://mobyproject.org/buildkit@v1',
   metadata: { 'https://mobyproject.org/buildkit@v1#metadata': { vcs: { revision: sha, source: `${REPOSITORY}.git` } } },
   buildConfig: { llbDefinition: [{}] },
   invocation: { parameters: { args: { 'build-arg:COMMIT_SHA': sha } } },
   materials: [{ uri: 'pkg:docker/node@22.23.1-alpine3.24?platform=linux%2Famd64', digest: { sha256: BASE_DIGEST.slice(7) } }],
+});
+
+const signedFixture = predicate => ({
+  payloadType: 'application/vnd.in-toto+json',
+  payload: Buffer.from(JSON.stringify({
+    _type: 'https://in-toto.io/Statement/v0.1',
+    predicateType: PROVENANCE_TYPE,
+    subject: [{ name: REPOSITORY, digest: { sha256: digest.slice(7) } }],
+    predicate,
+  })).toString('base64'),
+  signatures: [{ sig: 'synthetic-test-signature' }],
 });
 
 test('runtime pin is accepted; different patches and unsupported majors fail', () => {
@@ -82,6 +94,48 @@ test('inherited MCP assertions use the pinned app runtime, not their default', (
 test('valid single-platform and mapped BuildKit predicates are accepted', () => {
   assert.equal(verifyProvenance(fixture(), sha).buildType, fixture().buildType);
   assert.equal(verifyProvenance({ 'linux/amd64': fixture() }, sha).buildType, fixture().buildType);
+});
+
+test('canonical-URI signed provenance preserves the validated BuildKit extension', () => {
+  const predicate = fixture();
+  const envelope = signedFixture(predicate);
+  assert.deepEqual(verifySignedProvenance(JSON.stringify(envelope), sha, digest), predicate);
+  assert.deepEqual(verifySignedProvenance([envelope], sha, digest), predicate);
+  assert.deepEqual(verifySignedProvenance(`${JSON.stringify(envelope)}\n${JSON.stringify(envelope)}\n`, sha, digest), predicate);
+});
+
+test('publisher verifies signed content before claiming provenance verification', () => {
+  const workflow = read('.github/workflows/fork-image-publish.yml');
+  assert.doesNotMatch(workflow, /--type slsaprovenance(?:\s|$)/);
+  assert.ok(workflow.includes(`--type ${PROVENANCE_TYPE}`));
+  const verifyPosition = workflow.indexOf('cosign verify-attestation "$IMAGE_REF" --type https://slsa.dev/provenance/v0.2');
+  const contentPosition = workflow.indexOf('signed-provenance provenance-verification.json verified-provenance.json');
+  assert.ok(verifyPosition >= 0 && contentPosition > verifyPosition);
+  assert.ok(workflow.indexOf('provenanceVerified: true') > contentPosition);
+});
+
+for (const [name, mutate] of [
+  ['lost BuildKit metadata extension', p => { delete p.metadata['https://mobyproject.org/buildkit@v1#metadata']; }],
+  ['changed signed source', p => { p.metadata['https://mobyproject.org/buildkit@v1#metadata'].vcs.revision = '2'.repeat(40); }],
+  ['changed signed base', p => { p.materials[0].digest.sha256 = '0'.repeat(64); }],
+  ['signed credential argument', p => { p.invocation.parameters.args['build-arg:GITHUB_TOKEN'] = 'synthetic'; }],
+]) {
+  test(`signed content rejects ${name}`, () => {
+    const predicate = fixture();
+    mutate(predicate);
+    assert.throws(() => verifySignedProvenance(signedFixture(predicate), sha, digest));
+  });
+}
+
+test('signed provenance rejects wrong digest, predicate type, empty and malformed output', () => {
+  const envelope = signedFixture(fixture());
+  assert.throws(() => verifySignedProvenance(envelope, sha, `sha256:${'b'.repeat(64)}`));
+  const statement = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
+  statement.predicateType = 'https://example.invalid/other';
+  envelope.payload = Buffer.from(JSON.stringify(statement)).toString('base64');
+  assert.throws(() => verifySignedProvenance(envelope, sha, digest));
+  assert.throws(() => verifySignedProvenance([], sha, digest));
+  assert.throws(() => verifySignedProvenance('invalid output', sha, digest));
 });
 
 for (const [name, mutate] of [
