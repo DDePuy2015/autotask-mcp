@@ -1,0 +1,4 @@
+# Reviewed historical curl examples use literal documentation placeholders.
+# Ignore only these immutable findings; all rules, other history and future changes stay scanned.
+14d568223c9269de2d5e3e2eba5056351ca3e82d:docs/MIGRATION_GUIDE.md:curl-auth-header:106
+14d568223c9269de2d5e3e2eba5056351ca3e82d:docs/MIGRATION_GUIDE.md:curl-auth-header:181
