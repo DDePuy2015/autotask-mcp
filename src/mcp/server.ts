@@ -27,6 +27,10 @@ import { AutotaskResourceHandler } from '../handlers/resource.handler.js';
 import { AutotaskToolHandler } from '../handlers/tool.handler.js';
 import { registerPromptHandlers } from './prompts.js';
 import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
+import {
+  AUTOTASK_BACKEND_TOKEN_HEADER,
+  validateBackendToken,
+} from './backend-auth.js';
 
 export class AutotaskMcpServer {
   private config: McpServerConfig;
@@ -324,7 +328,7 @@ export class AutotaskMcpServer {
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
       res.setHeader(
         'Access-Control-Allow-Headers',
-        'Content-Type, Accept, Authorization, Mcp-Session-Id, X-API-Key, X-API-Secret, X-Integration-Code, X-Impersonation-Resource-Id'
+        'Content-Type, Accept, Authorization, Mcp-Session-Id, X-API-Key, X-API-Secret, X-Integration-Code, X-Impersonation-Resource-Id, X-Summit-Autotask-Backend-Token'
       );
       res.setHeader('Access-Control-Max-Age', '86400');
 
@@ -354,6 +358,17 @@ export class AutotaskMcpServer {
         return;
       }
 
+      // Readiness is independent of liveness and fails closed when the
+      // proxy-to-provider token has not been provisioned. The proxy owns the
+      // public authentication boundary; this provider check protects the
+      // internal hop as well.
+      if (url.pathname === '/ready') {
+        const ready = Boolean(process.env.AUTOTASK_BACKEND_TOKEN);
+        res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: ready ? 'ready' : 'not_ready' }));
+        return;
+      }
+
       // MCP endpoint — dual-era handler (fresh factory-built server per
       // request in both eras; nothing is shared between requests)
       if (url.pathname === '/mcp') {
@@ -377,6 +392,28 @@ export class AutotaskMcpServer {
             }));
             return;
           }
+        }
+
+        const headerValue = req.headers[AUTOTASK_BACKEND_TOKEN_HEADER];
+        const suppliedBackendToken = Array.isArray(headerValue)
+          ? headerValue[0]
+          : headerValue;
+        const backendAuthFailure = validateBackendToken(
+          process.env.AUTOTASK_BACKEND_TOKEN,
+          suppliedBackendToken,
+        );
+        if (backendAuthFailure) {
+          res.writeHead(backendAuthFailure === 'not_configured' ? 503 : 401, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify({
+            error:
+              backendAuthFailure === 'not_configured'
+                ? 'Backend authentication is not configured.'
+                : 'Backend authentication failed.',
+          }));
+          return;
         }
 
         // In gateway mode, require the injected credential headers up front.
@@ -424,7 +461,7 @@ export class AutotaskMcpServer {
 
       // 404 for everything else
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not found', endpoints: ['/mcp', '/health'] }));
+      res.end(JSON.stringify({ error: 'Not found', endpoints: ['/mcp', '/health', '/ready'] }));
     });
 
     await new Promise<void>((resolve) => {

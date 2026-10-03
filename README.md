@@ -227,6 +227,8 @@ AUTH_MODE=env               # env (local), gateway (hosted)
 MCP_TRANSPORT=stdio          # stdio, http
 MCP_HTTP_PORT=8080           # HTTP transport port (only used when MCP_TRANSPORT=http)
 MCP_HTTP_HOST=0.0.0.0        # HTTP transport bind address
+# Hosted HTTP deployments: proxy-injected token required on /mcp.
+AUTOTASK_BACKEND_TOKEN=
 
 # Logging
 LOG_LEVEL=info          # error, warn, info, debug
@@ -245,6 +247,13 @@ NODE_ENV=production
 ### Gateway Mode
 
 When deployed behind an MCP Gateway (e.g., `mcp.wyre.ai`), the server operates in gateway mode where credentials are injected via HTTP headers on each request.
+
+Hosted Summit deployments also require `AUTOTASK_BACKEND_TOKEN` and the
+proxy-only `X-Summit-Autotask-Backend-Token` header on `/mcp`. The backend
+rejects missing or invalid tokens before MCP dispatch; the token is not used
+by stdio, is never logged, and should be supplied from a secret manager. The
+existing optional `CONDUIT_S2S_SECRET` check remains an independent upstream
+gateway compatibility control when provisioned.
 
 **Enable Gateway Mode:**
 
@@ -464,7 +473,8 @@ MCP_TRANSPORT=http MCP_HTTP_PORT=8080 node dist/index.js
 
 The HTTP transport exposes:
 - `POST /mcp` — MCP Streamable HTTP endpoint
-- `GET /health` — Health check (returns `{"status":"ok"}`)
+- `GET /health` — Unauthenticated liveness check (returns `{"status":"ok"}`)
+- `GET /ready` - Readiness check; returns `503` until the hosted backend token is configured
 
 Clients must send requests to `/mcp` with `Accept: application/json, text/event-stream` headers per the MCP Streamable HTTP specification.
 
