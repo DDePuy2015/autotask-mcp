@@ -64,7 +64,10 @@ describe('exact ticket lookup', () => {
     ]));
     expect(body(fetchSpy).filter).not.toEqual(expect.arrayContaining([expect.objectContaining({ op: 'noteq' })]));
   });
-  test.each([[], [{ ...row, ticketNumber: 'T20261003.0002' }], [row, { ...row, id: 43 }], [{ ...row, id: undefined }]])('missing, mismatched or ambiguous records fail safely: %j', async items => {
+  test.each([
+    { items: [] }, { items: [{ ...row, ticketNumber: 'T20261003.0002' }] },
+    { items: [row, { ...row, id: 43 }] }, { items: [{ ...row, id: undefined }] },
+  ])('missing, mismatched or ambiguous records fail safely: %j', async ({ items }) => {
     fetchSpy.mockResolvedValue(new Response(JSON.stringify({ items, pageDetails: {} })));
     if (items.length === 0) expect(await service.getTicketByNumber(number)).toBeNull();
     else await expect(service.getTicketByNumber(number)).rejects.toThrow();
