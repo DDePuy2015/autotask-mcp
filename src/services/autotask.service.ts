@@ -58,6 +58,7 @@ import {
 } from '../types/autotask';
 import { McpServerConfig } from '../types/mcp';
 import { Logger } from '../utils/logger';
+import { isFullTicketNumber, normalizeTicketNumber, requirePositiveId } from '../utils/ticket-identifier';
 import { FieldInfo, PicklistValue } from './picklist.cache';
 
 /**
@@ -424,16 +425,34 @@ export class AutotaskService {
   // =====================================================
 
   async getTicket(id: number, fullDetails: boolean = false): Promise<AutotaskTicket | null> {
+    requirePositiveId(id, 'ticketID');
     const http = await this.ensureClient();
     try {
       this.logger.debug(`Getting ticket with ID: ${id}, fullDetails: ${fullDetails}`);
       const ticket = await http.get<AutotaskTicket>('Tickets', id);
       if (!ticket) return null;
+      if (ticket.id !== id) throw new Error('The ticket ID lookup did not return the requested ticket.');
       return fullDetails ? ticket : this.optimizeTicketData(ticket);
     } catch (error) {
       this.logger.error(`Failed to get ticket ${id}:`, error);
       throw error;
     }
+  }
+
+  async getTicketByNumber(ticketNumber: string, fullDetails: boolean = false): Promise<AutotaskTicket | null> {
+    const number = normalizeTicketNumber(ticketNumber);
+    const http = await this.ensureClient();
+    // Direct lookup has one equality clause, with no search defaults or
+    // status/date/queue constraints. Never guess when the API is ambiguous.
+    const tickets = await http.query<AutotaskTicket>('Tickets', [
+      { op: 'eq', field: 'ticketNumber', value: number },
+    ], { maxRecords: 2 });
+    if (tickets.length === 0) return null;
+    if (tickets.length !== 1 || typeof tickets[0].ticketNumber !== 'string' || tickets[0].ticketNumber.toUpperCase() !== number) {
+      throw new Error('The ticket-number lookup did not return one exact match.');
+    }
+    requirePositiveId(tickets[0].id, 'Returned ticket ID');
+    return fullDetails ? tickets[0] : this.optimizeTicketData(tickets[0]);
   }
 
   async searchTickets(options: AutotaskQueryOptionsExtended = {}): Promise<AutotaskTicket[]> {
@@ -443,13 +462,18 @@ export class AutotaskService {
 
       const filters: QueryFilter[] = [];
 
+      const exactNumber = isFullTicketNumber(options.searchTerm);
       if (options.searchTerm) {
-        filters.push({ op: 'beginsWith', field: 'ticketNumber', value: options.searchTerm });
+        filters.push({
+          op: exactNumber ? 'eq' : 'beginsWith',
+          field: 'ticketNumber',
+          value: exactNumber ? normalizeTicketNumber(options.searchTerm) : options.searchTerm,
+        });
       }
 
       if (options.status !== undefined) {
         filters.push({ op: 'eq', field: 'status', value: options.status });
-      } else {
+      } else if (!exactNumber) {
         filters.push({ op: 'noteq', field: 'status', value: 5 }); // 5 = Complete (Autotask REST uses 'noteq', not 'ne')
       }
 
@@ -1933,6 +1957,8 @@ export class AutotaskService {
     attachmentId: number,
     options: { includeData?: boolean; maxInlineBase64Bytes?: number } = {}
   ): Promise<(AutotaskTicketAttachment & { dataOmittedReason?: string }) | null> {
+    requirePositiveId(ticketId, 'ticketId');
+    requirePositiveId(attachmentId, 'attachmentId');
     const includeData = options.includeData ?? false;
     const maxInlineBase64Bytes =
       options.maxInlineBase64Bytes ?? AutotaskService.DEFAULT_MAX_INLINE_ATTACHMENT_BASE64;
@@ -1946,12 +1972,15 @@ export class AutotaskService {
       if (!includeData) {
         // The child endpoint never populates the `data` field — using it for
         // the metadata-only path sidesteps the binary download entirely.
-        return await http.childGet<AutotaskTicketAttachment>(
+        const metadata = await http.childGet<AutotaskTicketAttachment>(
           'Tickets',
           ticketId,
           'Attachments',
           attachmentId
         );
+        if (!metadata) return null;
+        const { data: _data, ...rest } = metadata;
+        return rest;
       }
 
       // Only the top-level entity endpoint populates `data`; the child endpoint
@@ -1961,9 +1990,9 @@ export class AutotaskService {
 
       // The top-level endpoint accepts any attachment ID, so we have to enforce
       // parent scope ourselves to honor the (ticketId, attachmentId) contract.
-      if (typeof attachment.ticketID === 'number' && attachment.ticketID !== ticketId) {
+      if (attachment.ticketID !== ticketId || attachment.id !== attachmentId) {
         this.logger.warn(
-          `Ticket attachment ${attachmentId} belongs to ticket ${attachment.ticketID}, not ${ticketId}. Returning null.`
+          `Ticket attachment ${attachmentId} could not be verified for ticket ${ticketId}. Returning null.`
         );
         return null;
       }
@@ -2054,8 +2083,11 @@ export class AutotaskService {
   async getTicketNoteAttachment(
     ticketNoteId: number,
     attachmentId: number,
-    options: { includeData?: boolean; maxInlineBase64Bytes?: number } = {}
+    options: { includeData?: boolean; maxInlineBase64Bytes?: number; ticketId?: number } = {}
   ): Promise<(AutotaskTicketNoteAttachment & { dataOmittedReason?: string }) | null> {
+    requirePositiveId(ticketNoteId, 'ticketNoteId');
+    requirePositiveId(attachmentId, 'attachmentId');
+    if (options.ticketId !== undefined) requirePositiveId(options.ticketId, 'ticketId');
     const includeData = options.includeData ?? false;
     const maxInlineBase64Bytes =
       options.maxInlineBase64Bytes ?? AutotaskService.DEFAULT_MAX_INLINE_ATTACHMENT_BASE64;
@@ -2069,12 +2101,15 @@ export class AutotaskService {
       if (!includeData) {
         // The child endpoint never populates the `data` field — using it for
         // the metadata-only path sidesteps the binary download entirely.
-        return await http.childGet<AutotaskTicketNoteAttachment>(
+        const metadata = await http.childGet<AutotaskTicketNoteAttachment>(
           'TicketNotes',
           ticketNoteId,
           'Attachments',
           attachmentId
         );
+        if (!metadata) return null;
+        const { data: _data, ...rest } = metadata;
+        return rest;
       }
 
       // Only the top-level entity endpoint populates `data`; the child endpoint
@@ -2091,9 +2126,10 @@ export class AutotaskService {
       // AND mismatched values in one check — the earlier `typeof === 'number'
       // && !==` form let an attachment with no ticketNoteID through
       // unverified (CodeRabbit PR #300 review).
-      if (attachment.ticketNoteID !== ticketNoteId) {
+      if (attachment.ticketNoteID !== ticketNoteId || attachment.id !== attachmentId ||
+          (options.ticketId !== undefined && attachment.ticketID !== options.ticketId)) {
         this.logger.warn(
-          `Ticket note attachment ${attachmentId} does not belong to note ${ticketNoteId} (ticketNoteID: ${attachment.ticketNoteID ?? 'missing'}). Returning null.`
+          `Ticket note attachment ${attachmentId} could not be verified for note ${ticketNoteId}. Returning null.`
         );
         return null;
       }

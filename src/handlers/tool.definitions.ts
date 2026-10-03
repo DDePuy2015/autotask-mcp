@@ -461,13 +461,13 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   // Ticket tools
   {
     name: 'autotask_search_tickets',
-    description: 'Search tickets by company, queue, status, priority. Use autotask_get_ticket_details for full data. Max 500/page.',
+    description: 'Search tickets by company, queue, status, priority, or ticket number. Broad searches default to open tickets; a full ticket number includes all statuses. Use autotask_get_ticket_details with ticketID or ticketNumber for an exact lookup without search filters. Max 500/page.',
     inputSchema: {
       type: 'object',
       properties: {
         searchTerm: {
           type: 'string',
-          description: 'Search by ticket number prefix'
+          description: 'Ticket-number prefix, or full TYYYYMMDD.NNNN number for an exact match across all statuses. Prefix searches remain open-only by default; explicitly supplied search filters are respected.'
         },
         companyID: {
           type: 'number',
@@ -526,14 +526,21 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   },
   {
     name: 'autotask_get_ticket_details',
-    description: 'Get full ticket details including notes, time entries, and custom fields.',
+    description: 'Get ticket details by exactly one internal ticketID or exact ticketNumber, across all statuses including completed tickets, without status/date/queue search filters. Use the returned ticketID for related notes, time entries, or attachments.',
     _meta: TICKET_CARD_META,
     inputSchema: {
       type: 'object',
       properties: {
         ticketID: {
-          type: 'number',
-          description: 'Ticket ID to retrieve'
+          type: 'integer',
+          minimum: 1,
+          description: 'Internal ticket ID. Supply this or ticketNumber, not both.'
+        },
+        ticketNumber: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 32,
+          description: 'Exact ticket number, for example T20261003.0001. An explicit compact legacy number is also supported. Supply this or ticketID, not both.'
         },
         fullDetails: {
           type: 'boolean',
@@ -541,7 +548,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           default: false
         }
       },
-      required: ['ticketID']
+      oneOf: [{ required: ['ticketID'] }, { required: ['ticketNumber'] }]
     }
   },
   {
@@ -1501,7 +1508,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   // Ticket Attachments tools
   {
     name: 'autotask_get_ticket_attachment',
-    description: 'Get a ticket attachment. With includeData=false (default) returns metadata only — fast, suitable for browsing. With includeData=true returns the base64 binary content via the top-level /TicketAttachments/{id} endpoint (the child endpoint never populates data). The attachment is verified to belong to the given ticketId. Oversized binaries are stripped from the response with a dataOmittedReason field — Autotask attachments can be up to 3 MB, which is ~4 MB as base64 and may exceed the MCP client tool-result limit (~1 MB).',
+    description: 'Get a ticket attachment. Default includeData=false returns metadata only. With includeData=true, verified PNG, JPEG and non-animated WebP images are returned as native MCP image content alongside text metadata, with a fixed 512 KiB raw limit, 8192 pixels per edge and 16 megapixels. Unsupported, malformed or unverified images return an error. Other file types retain the existing base64 data response. The attachment ID and parent ticket ownership are verified before returning content. Service-level oversized files are omitted with dataOmittedReason.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1515,12 +1522,12 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         },
         includeData: {
           type: 'boolean',
-          description: 'Set true to fetch the base64-encoded file bytes. Default false returns metadata only.',
+          description: 'Set true to fetch content: supported images return a native MCP image block, other files return base64 data. Default false returns metadata only.',
           default: false
         },
         maxInlineBase64Bytes: {
           type: 'number',
-          description: 'Cap on base64 string length before data is stripped (default 750_000, ~560 KB raw). Only relevant when includeData=true. Raise carefully — your MCP client may reject oversized tool results.',
+          description: 'Service cap on base64 string length before data is omitted (default 750_000). Only relevant when includeData=true. This cannot raise the fixed 512 KiB native image limit.',
           minimum: 1024
         }
       },
@@ -1551,7 +1558,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   // Ticket Note Attachments tools
   {
     name: 'autotask_get_ticket_note_attachment',
-    description: 'Get an attachment on a ticket NOTE (e.g. a pasted screenshot or file inside an internal note — distinct from attachments on the ticket itself). With includeData=false (default) returns metadata only — fast, suitable for browsing. With includeData=true returns the base64 binary content via the top-level /TicketNoteAttachments/{id} endpoint (the child endpoint never populates data). The attachment is verified to belong to the given ticketNoteId. Oversized binaries are stripped from the response with a dataOmittedReason field — Autotask attachments can be up to 3 MB, which is ~4 MB as base64 and may exceed the MCP client tool-result limit (~1 MB).',
+    description: 'Get an attachment on a ticket NOTE, such as a pasted screenshot. Default includeData=false returns metadata only. With includeData=true, supported PNG, JPEG and non-animated WebP images return native MCP image content alongside text metadata. Supply ticketId for image content so both note and parent ticket ownership can be verified. Images have a fixed 512 KiB raw limit, 8192 pixels per edge and 16 megapixels; unsupported, malformed or unverified images return an error. Other file types retain the existing base64 data response. Service-level oversized files are omitted with dataOmittedReason.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1559,18 +1566,23 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           type: 'number',
           description: 'The ticket note ID the attachment belongs to (from autotask_search_ticket_notes)'
         },
+        ticketId: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Parent ticket ID. Required to return native image content; verified against the attachment parent ticket.'
+        },
         attachmentId: {
           type: 'number',
           description: 'The attachment ID to retrieve'
         },
         includeData: {
           type: 'boolean',
-          description: 'Set true to fetch the base64-encoded file bytes. Default false returns metadata only.',
+          description: 'Set true to fetch content: supported images return a native MCP image block and require ticketId; other files return base64 data. Default false returns metadata only.',
           default: false
         },
         maxInlineBase64Bytes: {
           type: 'number',
-          description: 'Cap on base64 string length before data is stripped (default 750_000, ~560 KB raw). Only relevant when includeData=true. Raise carefully — your MCP client may reject oversized tool results.',
+          description: 'Service cap on base64 string length before data is omitted (default 750_000). Only relevant when includeData=true. This cannot raise the fixed 512 KiB native image limit.',
           minimum: 1024
         }
       },
