@@ -4,6 +4,7 @@
 
 import { McpServerConfig } from '../types/mcp.js';
 import { LogLevel } from './logger.js';
+import { resolveDateRangeDefaults, type DateRangeDefaults } from './relative-date-range.js';
 // `resolveJsonModule` is enabled in tsconfig. We read package.json so the
 // runtime can report its actual built version in the MCP initialize handshake
 // and the /health endpoint. The Dockerfile patches this file's `version` field
@@ -26,6 +27,7 @@ export type TransportType = 'stdio' | 'http';
 export type AuthMode = 'env' | 'gateway';
 
 export interface EnvironmentConfig {
+  dateRanges?: DateRangeDefaults;
   autotask: {
     username?: string;
     secret?: string;
@@ -170,6 +172,7 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
 
   return {
     autotask: autotaskConfig,
+    dateRanges: loadDateRangeDefaults(process.env),
     server: {
       name: process.env.MCP_SERVER_NAME || 'autotask-mcp',
       version: getServerVersion(process.env.MCP_SERVER_VERSION)
@@ -198,6 +201,7 @@ export function mergeWithMcpConfig(envConfig: EnvironmentConfig, mcpArgs?: Recor
   const serverConfig: McpServerConfig = {
     name: mcpArgs?.name || envConfig.server.name,
     version: mcpArgs?.version || envConfig.server.version,
+    dateRanges: resolveDateRangeDefaults(mcpArgs?.dateRanges ?? envConfig.dateRanges),
     autotask: {
       username: mcpArgs?.autotask?.username || envConfig.autotask.username,
       secret: mcpArgs?.autotask?.secret || envConfig.autotask.secret,
@@ -207,6 +211,22 @@ export function mergeWithMcpConfig(envConfig: EnvironmentConfig, mcpArgs?: Recor
   };
 
   return serverConfig;
+}
+
+/** Read portable Node/Worker settings; no credentials or host timezone involved. */
+export function loadDateRangeDefaults(env: {
+  AUTOTASK_DATE_TIMEZONE?: string;
+  AUTOTASK_WEEK_STARTS_ON?: string;
+}): Required<DateRangeDefaults> {
+  const defaults: DateRangeDefaults = {};
+  if (env.AUTOTASK_DATE_TIMEZONE !== undefined) defaults.timeZone = env.AUTOTASK_DATE_TIMEZONE;
+  if (env.AUTOTASK_WEEK_STARTS_ON !== undefined) {
+    if (!/^[0-6]$/.test(env.AUTOTASK_WEEK_STARTS_ON)) {
+      throw new Error('AUTOTASK_WEEK_STARTS_ON must be an integer from 0 (Sunday) to 6 (Saturday).');
+    }
+    defaults.weekStartsOn = Number(env.AUTOTASK_WEEK_STARTS_ON);
+  }
+  return resolveDateRangeDefaults(defaults);
 }
 
 /**
@@ -369,6 +389,8 @@ When AUTH_MODE=gateway, credentials are injected by the MCP Gateway:
 
 === Common Options ===
   AUTOTASK_API_URL         - Autotask API base URL (auto-detected if not provided)
+  AUTOTASK_DATE_TIMEZONE   - IANA timezone for relative ticket ranges (default: America/New_York)
+  AUTOTASK_WEEK_STARTS_ON  - Week start for lastweek: 0=Sunday through 6=Saturday (default: 1=Monday)
   AUTH_MODE                - Authentication mode: env (default), gateway
   MCP_SERVER_NAME          - Server name (default: autotask-mcp)
   MCP_SERVER_VERSION       - Override the reported server version. Defaults to the version baked into the image's package.json at build time. Useful for stamping a custom build identifier.

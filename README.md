@@ -54,6 +54,12 @@ See [Installation](#installation) for Docker and from-source methods.
 
 ## Features
 
+Ticket searches support structured timezone-aware `relativeDateRange` filters
+for today, seven calendar dates including today, and the previous calendar week.
+Choose created, completed, or last updated explicitly; see
+[Relative ticket date filters](docs/RELATIVE_DATE_FILTERS.md) for boundaries,
+defaults and examples.
+
 - **🔌 MCP Protocol Compliance**: Full support for MCP resources and tools
 - **🎴 Interactive Ticket Card (MCP Apps)**: `autotask_get_ticket_details` renders as an interactive card in MCP Apps hosts (Claude Desktop/web) with an in-card "Add note" round-trip; neutral theme by default, brandable via `MCP_BRAND_*` env vars; plain-JSON behavior is unchanged in other hosts
 - **🛠️ Comprehensive API Coverage**: 101 tools spanning companies, contacts, tickets, projects, billing items, time entries, notes, attachments, and more

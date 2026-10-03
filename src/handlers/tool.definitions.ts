@@ -461,7 +461,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   // Ticket tools
   {
     name: 'autotask_search_tickets',
-    description: 'Search tickets by company, queue, status, priority, or ticket number. Broad searches default to open tickets; a full ticket number includes all statuses. Use autotask_get_ticket_details with ticketID or ticketNumber for an exact lookup without search filters. Max 500/page.',
+    description: 'Search tickets by company, queue, status, priority, ticket number or structured relativeDateRange (today, last7days, lastweek; choose created, completed or lastUpdated). Broad searches default to open tickets; full ticket numbers and completion-date ranges include all statuses unless status is explicit. Use autotask_get_ticket_details with ticketID or ticketNumber for exact lookup without search filters. Max 500/page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -500,6 +500,24 @@ export const TOOL_DEFINITIONS: McpTool[] = [
         createdAfter: {
           type: 'string',
           description: 'Filter tickets created on or after this date (ISO format, e.g. 2026-01-01)'
+        },
+        relativeDateRange: {
+          type: 'object',
+          description: 'Bounded local-calendar range, mutually exclusive with createdAfter, createdBefore and lastActivityAfter. Defaults: America/New_York, Monday week start; configurable by deployment. Never infer a date filter for an exact ticket lookup.',
+          additionalProperties: false,
+          required: ['range', 'field'],
+          properties: {
+            range: {
+              type: 'string', enum: ['today', 'last7days', 'lastweek'],
+              description: 'today: local midnight to next midnight. last7days: seven local calendar dates including today (today minus six days to next midnight). lastweek: previous complete calendar week, Monday-Sunday by default. Start inclusive, end exclusive.',
+            },
+            field: {
+              type: 'string', enum: ['created', 'completed', 'lastUpdated'],
+              description: 'created = createDate; completed = completedDate (includes completed tickets when status omitted); lastUpdated = lastTrackedModificationDateTime, which excludes activity/notification-only changes.',
+            },
+            timeZone: { type: 'string', description: 'IANA timezone override, e.g. America/New_York, Europe/London or UTC.' },
+            weekStartsOn: { type: 'integer', minimum: 0, maximum: 6, description: 'lastweek only: 0=Sunday through 6=Saturday; default 1=Monday.' },
+          },
         },
         createdBefore: {
           type: 'string',

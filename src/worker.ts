@@ -32,6 +32,7 @@ import { AutotaskMcpServer } from './mcp/server.js';
 import { Logger } from './utils/logger.js';
 import {
   getServerVersion,
+  loadDateRangeDefaults,
   parseCredentialsFromHeaders,
 } from './utils/config.js';
 import type { McpServerConfig } from './types/mcp.js';
@@ -42,6 +43,8 @@ import {
 import { S2S_HEADER, verifyS2sHeader } from './mcp/s2s-verify.js';
 
 export interface Env {
+  AUTOTASK_DATE_TIMEZONE?: string;
+  AUTOTASK_WEEK_STARTS_ON?: string;
   AUTOTASK_USERNAME?: string;
   AUTOTASK_SECRET?: string;
   AUTOTASK_INTEGRATION_CODE?: string;
@@ -106,6 +109,7 @@ function getAppServer(env: Env): AutotaskMcpServer {
     name: 'autotask-mcp',
     version: getServerVersion(),
     autotask,
+    dateRanges: loadDateRangeDefaults(env),
   };
 
   appServer = new AutotaskMcpServer(config, logger, {

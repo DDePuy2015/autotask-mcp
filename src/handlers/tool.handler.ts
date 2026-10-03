@@ -242,7 +242,7 @@ export class AutotaskToolHandler {
    * Returns date filter params or null if elicitation is not available/dismissed.
    * Times out after 5 seconds to avoid blocking in non-interactive environments.
    */
-  protected async elicitDateRange(): Promise<Record<string, string> | null> {
+  protected async elicitDateRange(): Promise<Record<string, unknown> | null> {
     if (!this.mcpServer) return null;
 
     try {
@@ -258,8 +258,8 @@ export class AutotaskToolHandler {
               type: 'string' as const,
               title: 'Date Range',
               description: 'How far back to search',
-              enum: ['today', 'past_week', 'past_month', 'past_quarter', 'all'],
-              enumNames: ['Today', 'Past Week', 'Past Month', 'Past Quarter', 'All Time'],
+              enum: ['today', 'past_week', 'last_week', 'past_month', 'past_quarter', 'all'],
+              enumNames: ['Today', 'Last 7 Calendar Days (including today)', 'Previous Calendar Week', 'Past Month', 'Past Quarter', 'All Time'],
             }
           },
           required: ['dateRange'],
@@ -273,12 +273,11 @@ export class AutotaskToolHandler {
 
         switch (range) {
           case 'today':
-            createdAfter = now.toISOString().split('T')[0];
-            break;
+            return { relativeDateRange: { range: 'today', field: 'created' } };
           case 'past_week':
-            now.setDate(now.getDate() - 7);
-            createdAfter = now.toISOString().split('T')[0];
-            break;
+            return { relativeDateRange: { range: 'last7days', field: 'created' } };
+          case 'last_week':
+            return { relativeDateRange: { range: 'lastweek', field: 'created' } };
           case 'past_month':
             now.setMonth(now.getMonth() - 1);
             createdAfter = now.toISOString().split('T')[0];
@@ -928,7 +927,7 @@ export class AutotaskToolHandler {
         // and effectively dropping the company scope on the search.
         const hasFilters = a.searchTerm || a.companyID !== undefined || a.contactID || a.status !== undefined ||
           a.priority !== undefined || a.queueID !== undefined ||
-          a.assignedResourceID || a.unassigned || a.createdAfter || a.createdBefore || a.lastActivityAfter;
+          a.assignedResourceID || a.unassigned || a.createdAfter || a.createdBefore || a.lastActivityAfter || a.relativeDateRange !== undefined;
         if (!hasFilters && this.mcpServer) {
           const dateChoice = await this.elicitDateRange();
           if (dateChoice) a = { ...a, ...dateChoice };
