@@ -45,6 +45,9 @@ describe('native image responses over authenticated provider HTTP', () => {
   async function request(method: string, params: unknown, version = '2025-06-18', token: string | undefined = 'synthetic-image-backend-token') {
     return localFetch(baseUrl, { method: 'POST', headers: {
       'content-type': 'application/json', accept: 'application/json, text/event-stream',
+      // Each case restarts the fixture on the same origin. Do not reuse a
+      // pooled connection from the server that the preceding case closed.
+      connection: 'close',
       'mcp-protocol-version': version, ...(token ? { 'x-summit-autotask-backend-token': token } : {}),
     }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
   }
@@ -55,6 +58,7 @@ describe('native image responses over authenticated provider HTTP', () => {
   test.each(['2024-11-05', '2025-06-18'])('protocol %s transports native ticket image blocks', async version => {
     const init = await request('initialize', { protocolVersion: version, capabilities: {}, clientInfo: { name: 'image-fixture', version: '0' } }, version);
     expect(init.status).toBe(200);
+    await rpcBody(init); // Consume the initialization response before teardown.
     const response = await request('tools/call', { name: 'autotask_get_ticket_attachment', arguments: { ticketId: 123, attachmentId: 456, includeData: true } }, version);
     expect(response.status).toBe(200);
     const body = await rpcBody(response);
