@@ -1,13 +1,12 @@
-# Multi-stage build for efficient container size
-FROM node:26-alpine AS builder
+# syntax=docker/dockerfile:1
+# Reviewed Node runtime; both stages use the same immutable multi-platform base.
+FROM node:22.23.1-alpine3.24@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS builder
 
 # Build arguments
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
 ARG BUILD_DATE="unknown"
-ARG GITHUB_TOKEN
 
-# node:22-alpine ships with npm 10.x — no need to install globally
 # Set working directory
 WORKDIR /app
 
@@ -15,9 +14,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (--ignore-scripts prevents 'prepare' from running before source is copied)
-# GitHub Packages auth for @wyre-ai scope (autotask-node is consumed via the registry)
-RUN echo "@wyre-ai:registry=https://npm.pkg.github.com" > .npmrc && \
-    echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" >> .npmrc && \
+# The credential exists only in this BuildKit secret mount, never an ARG/layer.
+# Keep the explicitly retained legacy SDK scope until a separate migration.
+RUN --mount=type=secret,id=github_token,env=NODE_AUTH_TOKEN,required=true \
+    printf '%s\n' 'engine-strict=true' \
+      '@wyre-ai:registry=https://npm.pkg.github.com' \
+      '@wyre-technology:registry=https://npm.pkg.github.com' \
+      '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > .npmrc && \
     npm ci --ignore-scripts && rm -f .npmrc
 
 # Copy source code
@@ -44,7 +47,7 @@ RUN if [ "${VERSION}" != "unknown" ]; then \
 RUN npm run build
 
 # Production stage
-FROM node:26-alpine AS production
+FROM node:22.23.1-alpine3.24@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS production
 
 # Pull latest Alpine package fixes (e.g. OpenSSL) even when the base layer is cached
 RUN apk -U upgrade --no-cache
@@ -64,7 +67,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
 # Prune dev dependencies (avoids re-installing git deps which need build tools)
-RUN npm prune --omit=dev && npm cache clean --force
+RUN npm prune --omit=dev --ignore-scripts && npm cache clean --force
 
 # Remove the npm CLI from the production image — the runtime only needs `node`
 # (CMD is `node dist/index.js`), and npm's bundled dependencies regularly trip
@@ -114,7 +117,7 @@ LABEL org.opencontainers.image.description="Model Context Protocol server for Ka
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${COMMIT_SHA}"
-LABEL org.opencontainers.image.source="https://github.com/WYRE-AI/autotask-mcp"
+LABEL org.opencontainers.image.source="https://github.com/DDePuy2015/autotask-mcp"
 LABEL org.opencontainers.image.documentation="https://github.com/WYRE-AI/autotask-mcp/blob/main/README.md"
 LABEL org.opencontainers.image.url="https://github.com/WYRE-AI/autotask-mcp/pkgs/container/autotask-mcp"
 LABEL org.opencontainers.image.vendor="Wyre Technology"

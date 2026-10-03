@@ -55,3 +55,16 @@ dev-debug.log
 .wrangler/
 graphify-out/
 .starlog/
+
+# Generated release evidence is retained as workflow artifacts, not source.
+*-sbom.cdx.json
+*-scan.json
+*-scan-summary.json
+npm-audit.json
+tag-check-error.txt
+image-metadata.json
+buildkit-provenance.json
+verified-provenance.json
+signature-verification.json
+sbom-verification.json
+provenance-verification.json

@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+      secrets:
+        - github_token
     image: autotask-mcp:latest
     container_name: autotask-mcp-server
     restart: unless-stopped
@@ -59,6 +61,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: builder
+      secrets:
+        - github_token
     image: autotask-mcp:dev
     container_name: autotask-mcp-dev
     working_dir: /app
@@ -85,6 +89,10 @@ services:
     stdin_open: true
     tty: true
 
+secrets:
+  github_token:
+    environment: NODE_AUTH_TOKEN
+
 volumes:
   autotask-mcp-logs:
     driver: local
@@ -97,4 +105,4 @@ volumes:
 # AUTOTASK_INTEGRATION_CODE=your-integration-code
 # AUTOTASK_API_URL=https://webservices.autotask.net/atservices/1.6/atws.asmx
 # LOG_LEVEL=info
-# LOG_FORMAT=json 
+# LOG_FORMAT=json

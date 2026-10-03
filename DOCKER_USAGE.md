@@ -2,6 +2,58 @@
 
 This document provides comprehensive instructions for running the Autotask MCP Server using Docker.
 
+## Summit fork release boundary
+
+Summit builds this fork with Node **22.23.1**, pinned in `.nvmrc` and both
+Docker stages by the reviewed base digest. `npm ci --ignore-scripts` and
+production pruning run without dependency lifecycle scripts. Local validation
+must use that runtime; Node 20/26 and a different Node 22 patch are not release
+validation substitutes. Actions' own JavaScript runtime is separate.
+
+Local builds require an existing approved package-read credential in
+`NODE_AUTH_TOKEN`. Docker receives it only through the `github_token` BuildKit
+secret mount. Do not pass credentials as build arguments or write them into
+the build context. `.npmrc` is excluded from the image context. Compose uses
+the same environment-backed build secret; it is not a runtime secret.
+
+The `Fork Container Validation` workflow runs source checks, production audit,
+Gitleaks, source CycloneDX SBOM, exact-runtime/non-root/HTTP image smoke tests,
+and HIGH/CRITICAL fixable vulnerability plus secret scans before image SBOM
+generation. Findings fail closed; retained secret-scan evidence contains only
+metadata, never raw matches or code excerpts.
+
+The draft `Fork Image Publish (GHCR only)` workflow reuses those gates. Its
+only write path is a separately approved manual dispatch from `main` with:
+
+- `source_sha`: the exact 40-character current merged `main` SHA;
+- `image_tag`: a never-reused `sha-<full-source-sha>` tag, optionally suffixed
+  `-r<run-number>` after a failed attempt; and
+- `confirm_publish`: `PUBLISH_DDEPUY2015_AUTOTASK_MCP`.
+
+It records the source, base digest, run, pushed digest, sanitized scans,
+CycloneDX SBOM, maximum-mode BuildKit provenance, and verified keyless
+signature/attestations. The provenance predicate uses its canonical URI to preserve BuildKit source
+extensions. After cryptographic verification, decoded signed content must
+still match the reviewed source, base and exact image digest before the
+release record can claim provenance verification.
+A pushed but failed/unverified image is not deployable;
+do not overwrite its tag or treat publication as successful. The known
+single-operator model is not independent reviewer enforcement.
+
+**Proposed permission requiring separate activation approval:** `id-token:
+write` is confined to the manually gated Sigstore signing job. `packages:
+write` already exists for GHCR push. PR validation has only content/package/PR
+read access. No Azure login, federation, role grant, deployment, credential
+rotation, npm release, or MCP Registry publication is included.
+
+The upstream image examples below are historical/general usage, not Summit
+production release instructions. Azure rollout remains a separately approved
+digest-only operation under `summit-mcp-ops`, including zero-traffic probes,
+canary, metadata-only logs, and exact revision rollback. These build changes
+do not activate auth PR #2 or close SMP-007/SMP-008. The existing restored
+Autotask revision remains the rollback anchor until a separately approved
+rollout succeeds.
+
 ## Quick Start
 
 ### Pull from GitHub Container Registry
@@ -85,21 +137,22 @@ docker-compose up -d
 
 ```bash
 # Clone the repository
-git clone https://github.com/WYRE-AI/autotask-mcp.git
+git clone https://github.com/DDePuy2015/autotask-mcp.git
 cd autotask-mcp
 
 # Build the Docker image
-docker build -t autotask-mcp:local .
+docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:local .
 ```
 
 ### Build with Custom Tags
 
 ```bash
 # Build with version tag
-docker build -t autotask-mcp:v1.0.1 .
+docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:v1.0.1 .
 
 # Build with build arguments
 docker build \
+  --secret id=github_token,env=NODE_AUTH_TOKEN \
   --build-arg VERSION=1.0.1 \
   --build-arg COMMIT_SHA=$(git rev-parse HEAD) \
   --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
@@ -421,4 +474,4 @@ docker run --rm -v autotask-logs:/data -v $(pwd):/backup \
   alpine tar xzf /backup/autotask-logs-backup.tar.gz -C /data
 ```
 
-For more information, see the main [README.md](README.md) or visit the [GitHub repository](https://github.com/WYRE-AI/autotask-mcp). 
+For more information, see the main [README.md](README.md) or visit the [GitHub repository](https://github.com/DDePuy2015/autotask-mcp).

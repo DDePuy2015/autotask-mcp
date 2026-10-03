@@ -515,14 +515,14 @@ docker compose up -d
 
 ```bash
 # Build production image locally
-docker build -t autotask-mcp:latest .
+docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:local .
 
 # Run container
 docker run -d \
   --name autotask-mcp \
   --env-file .env \
   --restart unless-stopped \
-  autotask-mcp:latest
+  autotask-mcp:local
 ```
 
 ### Development Mode
@@ -812,4 +812,4 @@ By submitting a pull request, you agree to the terms of our [Contributor License
 
 ---
 
-Built by [WYRE Technology](https://github.com/WYRE-AI) — part of the [MSP Claude Plugins](https://github.com/WYRE-AI/msp-claude-plugins) ecosystem 
+Built by [WYRE Technology](https://github.com/WYRE-AI) - part of the [MSP Claude Plugins](https://github.com/WYRE-AI/msp-claude-plugins) ecosystem

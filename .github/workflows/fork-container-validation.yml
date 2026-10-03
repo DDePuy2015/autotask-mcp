@@ -1,66 +1,134 @@
 name: Fork Container Validation
 
-# PR-only validation for DDePuy2015/autotask-mcp. This deliberately does not
-# call the upstream release workflow, publish to the MCP Registry, create a
-# GitHub release, or push an image.
+# Read-only gates reused by the separately approved manual publisher.
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+    outputs:
+      source_sha:
+        description: Exact source commit that passed the gates
+        value: ${{ jobs.source-controls.outputs.source_sha }}
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: read
+
+env:
+  EXPECTED_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha }}
 
 jobs:
-  validate:
-    name: Validate linux/amd64 fork image
+  source-controls:
+    name: Source and dependency controls
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
     env:
-      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Checkout exact pull-request head
+      - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify source pin
+      - name: Verify immutable source and main-only publication eligibility
+        id: source
         shell: bash
         run: |
           set -euo pipefail
-          actual_sha="$(git rev-parse HEAD)"
-          test "$actual_sha" = "$EXPECTED_SHA"
-          echo "Validated source commit: $actual_sha"
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain)"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = refs/heads/main
+            test "$EXPECTED_SHA" = "$(git rev-parse origin/main)"
+          fi
+          echo "sha=$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
+      - name: Set up pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.x'
+          node-version-file: .nvmrc
           cache: npm
           registry-url: https://npm.pkg.github.com
 
-      - name: Configure legacy SDK scope
-        run: npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
+      - name: Verify runtime and release regressions
+        run: |
+          node scripts/release-checks.mjs runtime
+          node --test tests/release-controls.test.mjs
 
-      - name: Install dependencies
+      - name: Configure reviewed package scopes
+        run: |
+          npm config set --location=user @wyre-ai:registry https://npm.pkg.github.com
+          npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
+
+      - name: Install without lifecycle scripts
         run: npm ci --ignore-scripts
 
-      - name: Run lint
-        run: npm run lint
+      - name: Run required source checks
+        run: |
+          set -euo pipefail
+          npm run lint
+          node scripts/lint-destructive-warnings.mjs src
+          npm run build
+          npm test
+          npm audit --omit=dev --audit-level=high --json > npm-audit.json
 
-      - name: Lint destructive tool warnings
-        run: node scripts/lint-destructive-warnings.mjs src
+      - name: Scan repository for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_ENABLE_SUMMARY: false
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
 
-      - name: Build
-        run: npm run build
+      - name: Generate source CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: source-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
 
-      - name: Run tests
-        run: npm test
+      - name: Retain source evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-evidence-${{ env.EXPECTED_SHA }}
+          path: |
+            source-sbom.cdx.json
+            npm-audit.json
+          if-no-files-found: error
+
+  validate:
+    name: Validate linux/amd64 fork image
+    needs: source-controls
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.source-controls.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build date
+        id: date
+        run: echo "utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Build image without pushing
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
@@ -69,27 +137,81 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: autotask-mcp:pr-${{ github.event.pull_request.number }}
+          provenance: false
+          sbom: false
+          tags: autotask-mcp:release-check
+          secrets: |
+            github_token=${{ secrets.GITHUB_TOKEN }}
           build-args: |
-            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-            COMMIT_SHA=${{ github.event.pull_request.head.sha }}
-            BUILD_DATE=${{ github.run_started_at }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/DDePuy2015/autotask-mcp
-            org.opencontainers.image.revision=${{ github.event.pull_request.head.sha }}
+            COMMIT_SHA=${{ env.EXPECTED_SHA }}
+            BUILD_DATE=${{ steps.date.outputs.utc }}
 
-      - name: Verify image architecture and command
+      - name: Verify actual image runtime, command, non-root user and HTTP startup
         shell: bash
         run: |
           set -euo pipefail
-          image="autotask-mcp:pr-${{ github.event.pull_request.number }}"
-          metadata="$(docker image inspect "$image")"
-          echo "$metadata" | jq '.[0] | {cmd: .Config.Cmd, entrypoint: .Config.Entrypoint}'
-          echo "$metadata" | jq -e '
-            .[0]
-            | .Config.Cmd == ["node", "dist/index.js"]
+          image=autotask-mcp:release-check
+          docker image inspect "$image" | jq -e '
+            .[0] | .Architecture == "amd64" and .Os == "linux"
+              and .Config.Cmd == ["node", "dist/index.js"]
               and .Config.Entrypoint == ["docker-entrypoint.sh"]
-          '
-          runtime="$(docker run --rm --platform linux/amd64 --entrypoint node "$image" -e 'console.log(process.platform + "/" + process.arch)')"
-          test "$runtime" = 'linux/x64'
-          echo "Validated $image: runtime=$runtime, Cmd=node dist/index.js, Entrypoint=docker-entrypoint.sh"
+              and .Config.User == "autotask"'
+          expected="$(tr -d '\r\n' < .nvmrc)"
+          docker run --rm --entrypoint node "$image" \
+            -e 'if (process.versions.node !== process.argv[1] || process.getuid() !== 1001) process.exit(1)' "$expected"
+          smoke=autotask-release-smoke
+          trap 'docker rm -f "$smoke" >/dev/null 2>&1 || true' EXIT
+          docker run -d --name "$smoke" -e AUTH_MODE=gateway "$image" >/dev/null
+          docker exec "$smoke" node -e '
+            (async () => {
+              for (let attempt = 0; attempt < 30; attempt++) {
+                try { if ((await fetch("http://127.0.0.1:8080/health")).status === 200) return; } catch {}
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+              process.exit(1);
+            })();'
+
+      - name: Scan image for vulnerabilities and embedded secrets
+        id: scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: autotask-mcp:release-check
+          format: json
+          output: image-scan.json
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Retain only sanitized scan metadata
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        run: node scripts/release-checks.mjs scan-summary image-scan.json image-scan-summary.json
+
+      - name: Upload sanitized scan evidence
+        if: ${{ always() && steps.scan.outcome != 'skipped' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-scan-${{ env.EXPECTED_SHA }}
+          path: image-scan-summary.json
+          if-no-files-found: error
+
+      - name: Enforce image scan policy
+        if: ${{ steps.scan.outcome != 'success' }}
+        run: exit 1
+
+      - name: Generate image CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: autotask-mcp:release-check
+          format: cyclonedx-json
+          output-file: image-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Retain image SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-sbom-${{ env.EXPECTED_SHA }}
+          path: image-sbom.cdx.json
+          if-no-files-found: error
