@@ -11,6 +11,8 @@ import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
 import { buildTicketCard } from './card.builder.js';
+import { normalizeTicketNumber, requirePositiveId } from '../utils/ticket-identifier.js';
+import { prepareAttachmentImage, type NativeImageContent } from '../utils/attachment-image.js';
 
 // Default concurrency for company/resource name enrichment. Autotask allows
 // only a handful of concurrent API threads per integration, so enrichment is
@@ -83,6 +85,7 @@ export interface McpTool {
     type: 'object';
     properties: Record<string, any>;
     required?: string[];
+    oneOf?: Array<{ required: string[] }>;
   };
   annotations?: {
     title?: string;
@@ -96,10 +99,11 @@ export interface McpTool {
 }
 
 export interface McpToolResult {
-  content: Array<{
+  // Metadata/error text stays first for existing clients; native media follows.
+  content: [{
     type: 'text';
     text: string;
-  }>;
+  }, ...Array<{ type: 'text'; text: string } | NativeImageContent>];
   isError?: boolean;
 }
 
@@ -483,7 +487,16 @@ export class AutotaskToolHandler {
           requiredParams: !params.ticketId ? ['ticketId'] : [],
         };
       }
-      if (/\b(?:details?|info|view|show|get)\b/.test(intent) && numbers[0]) {
+      const exactNumber = rawIntent.match(/\bT\d{8}\.\d{4,}\b/i)?.[0];
+      if (exactNumber) {
+        return {
+          suggestedTool: 'autotask_get_ticket_details',
+          suggestedParams: { ticketNumber: normalizeTicketNumber(exactNumber), fullDetails: true },
+          description: 'Get exact ticket details across all statuses',
+          requiredParams: [],
+        };
+      }
+      if (/\b(?:details?|info|view|show|get|find|lookup)\b/.test(intent) && numbers[0]) {
         return {
           suggestedTool: 'autotask_get_ticket_details',
           suggestedParams: { ticketID: numbers[0], fullDetails: true },
@@ -863,7 +876,7 @@ export class AutotaskToolHandler {
   /**
    * Dispatch table: maps tool names to handler functions
    */
-  private getDispatchTable(): Map<string, (args: any) => Promise<{ result: any; message: string }>> {
+  private getDispatchTable(): Map<string, (args: any) => Promise<{ result: any; message: string; image?: NativeImageContent }>> {
     const s = this.autotaskService;
     type H = (args: any) => Promise<{ result: any; message: string }>;
     return new Map<string, H>([
@@ -926,7 +939,18 @@ export class AutotaskToolHandler {
         return { result: r, message: `Found ${r.length} tickets` };
       }],
       ['autotask_get_ticket_details', async (a) => {
-        const r = await s.getTicket(a.ticketID, a.fullDetails); return { result: r, message: 'Ticket details retrieved successfully' };
+        if ((a.ticketID !== undefined) === (a.ticketNumber !== undefined)) {
+          throw new Error('Provide exactly one of ticketID or ticketNumber.');
+        }
+        if (a.fullDetails !== undefined && typeof a.fullDetails !== 'boolean') throw new Error('fullDetails must be a boolean.');
+        let r;
+        if (a.ticketNumber !== undefined) {
+          r = await s.getTicketByNumber(normalizeTicketNumber(a.ticketNumber), a.fullDetails ?? false);
+        } else {
+          requirePositiveId(a.ticketID, 'ticketID');
+          r = await s.getTicket(a.ticketID, a.fullDetails ?? false);
+        }
+        return { result: r, message: 'Ticket details retrieved successfully' };
       }],
       ['autotask_create_ticket', async (a) => {
         const payload = buildTicketPayload(a);
@@ -1313,7 +1337,8 @@ export class AutotaskToolHandler {
         const message = r.dataOmittedReason
           ? `Ticket attachment retrieved (data omitted: oversized for inline transport)`
           : 'Ticket attachment retrieved successfully';
-        return { result: r, message };
+        const prepared: ReturnType<typeof prepareAttachmentImage> = a.includeData ? prepareAttachmentImage(r, a.ticketId) : { metadata: r };
+        return { result: prepared.metadata, message, ...(prepared.image ? { image: prepared.image } : {}) };
       }],
       ['autotask_search_ticket_attachments', async (a) => {
         const r = await s.searchTicketAttachments(a.ticketId, { pageSize: a.pageSize }); return { result: r, message: `Found ${r.length} ticket attachments` };
@@ -1322,12 +1347,14 @@ export class AutotaskToolHandler {
         const r = await s.getTicketNoteAttachment(a.ticketNoteId, a.attachmentId, {
           includeData: a.includeData,
           maxInlineBase64Bytes: a.maxInlineBase64Bytes,
+          ticketId: a.ticketId,
         });
         if (!r) return { result: null, message: `No ticket note attachment found with ID ${a.attachmentId} on note ${a.ticketNoteId}` };
         const message = r.dataOmittedReason
           ? `Ticket note attachment retrieved (data omitted: oversized for inline transport)`
           : 'Ticket note attachment retrieved successfully';
-        return { result: r, message };
+        const prepared: ReturnType<typeof prepareAttachmentImage> = a.includeData ? prepareAttachmentImage(r, a.ticketId) : { metadata: r };
+        return { result: prepared.metadata, message, ...(prepared.image ? { image: prepared.image } : {}) };
       }],
       ['autotask_search_ticket_note_attachments', async (a) => {
         const r = await s.searchTicketNoteAttachments(a.ticketNoteId, { pageSize: a.pageSize }); return { result: r, message: `Found ${r.length} ticket note attachments` };
@@ -1625,6 +1652,9 @@ export class AutotaskToolHandler {
     // Single-entity "get" tools: result is null/undefined
     const isGetTool = name.startsWith('autotask_get_');
     if (isGetTool && (result === null || result === undefined)) {
+      if (name === 'autotask_get_ticket_details' && args.ticketNumber !== undefined) {
+        return `No ticket found with exact ticket number ${normalizeTicketNumber(args.ticketNumber)}. Verify the number is correct.`;
+      }
       const entityLabel = name
         .replace('autotask_get_', '')
         .replace(/_/g, ' ');
@@ -1670,7 +1700,7 @@ export class AutotaskToolHandler {
       const handler = this.getDispatchTable().get(name);
       if (!handler) throw new Error(`Unknown tool: ${name}`);
 
-      const { result, message } = await handler(args);
+      const { result, message, image } = await handler(args);
 
       // Check for empty/not-found results and return explicit error to prevent hallucination
       const notFoundMsg = this.buildNotFoundMessage(name, args, result);
@@ -1712,7 +1742,7 @@ export class AutotaskToolHandler {
       }
 
       this.logger.debug(`Successfully executed tool: ${name}`);
-      return { content: [{ type: 'text', text: responseText }] };
+      return { content: [{ type: 'text', text: responseText }, ...(image ? [image] : [])] };
 
     } catch (error) {
       this.logger.error(`Tool execution failed for ${name}:`, error);
@@ -1742,7 +1772,7 @@ export class AutotaskToolHandler {
  * consistent so future error fields don't drift between paths.
  */
 function errorToolResult(payload: Record<string, unknown>): {
-  content: Array<{ type: 'text'; text: string }>;
+  content: [{ type: 'text'; text: string }];
   isError: true;
 } {
   return {
