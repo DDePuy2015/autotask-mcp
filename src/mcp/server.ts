@@ -152,6 +152,7 @@ export class AutotaskMcpServer {
       name: this.envConfig?.server?.name || 'autotask-mcp',
       version: getServerVersion(this.envConfig?.server?.version),
       autotask: autotaskConfig,
+      ...(this.config.dateRanges && { dateRanges: this.config.dateRanges }),
     };
 
     const service = new AutotaskService(requestConfig, this.logger);
