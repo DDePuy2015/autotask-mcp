@@ -9,6 +9,8 @@ dist
 build
 
 # Development files
+.npmrc
+.npmrc.*
 .env
 .env.*
 !.env.example
@@ -41,6 +43,16 @@ logs
 coverage
 .nyc_output
 
+# Release evidence belongs in workflow artifacts, not the application image.
+*-sbom.cdx.json
+*-scan.json
+*-scan-summary.json
+npm-audit.json
+image-metadata.json
+buildkit-provenance.json
+signature-verification.json
+sbom-verification.json
+
 # Documentation and plans (excluded from container)
 docs
 prompt_logs
@@ -55,4 +67,7 @@ LICENSE
 # Configuration files that aren't needed in container
 jest.config.js
 .eslintrc.*
-.prettierrc.* 
+.prettierrc.*
+tag-check-error.txt
+verified-provenance.json
+provenance-verification.json

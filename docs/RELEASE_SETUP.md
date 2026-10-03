@@ -154,11 +154,8 @@ gh release create v1.0.1 --auto --notes
 # Publish to NPM
 npm publish
 
-# Build and push Docker image
-docker build -t WYRE-AI/autotask-mcp:v1.0.1 .
-docker push WYRE-AI/autotask-mcp:v1.0.1
-docker tag WYRE-AI/autotask-mcp:v1.0.1 WYRE-AI/autotask-mcp:latest
-docker push WYRE-AI/autotask-mcp:latest
+# Local validation only; Summit publication uses the separately approved workflow
+docker build --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:local .
 ```
 
 ## Monitoring and Maintenance
@@ -294,4 +291,4 @@ Enable debug logging in GitHub Actions:
 - [Semantic Release Documentation](https://semantic-release.gitbook.io/)
 - [Conventional Commits](https://www.conventionalcommits.org/)
 
-For questions or issues with the release process, please open an issue in the GitHub repository. 
+For questions or issues with the release process, please open an issue in the GitHub repository.

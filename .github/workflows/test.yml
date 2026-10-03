@@ -11,32 +11,37 @@ on:
 
 jobs:
   test:
-    name: Test on Node.js ${{ matrix.node-version }}
+    name: Test on pinned Node.js runtime
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-    strategy:
-      matrix:
-        node-version: [20.x, 22.x]
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup pinned Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: .nvmrc
           cache: 'npm'
+          registry-url: https://npm.pkg.github.com
 
       - name: Configure npm for GitHub Packages
         run: |
-          echo "@wyre-ai:registry=https://npm.pkg.github.com" >> .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+          npm config set --location=user @wyre-ai:registry https://npm.pkg.github.com
+          npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
+
+      - name: Verify runtime and release regressions
+        run: |
+          node scripts/release-checks.mjs runtime
+          node --test tests/release-controls.test.mjs
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run linter
         run: npm run lint
@@ -79,15 +84,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Build image for ${{ matrix.platform }}
-        run: docker build --platform ${{ matrix.platform }} --build-arg GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} -t autotask-mcp:test .
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker build --platform ${{ matrix.platform }} --secret id=github_token,env=NODE_AUTH_TOKEN -t autotask-mcp:test .
 
       # The build alone proves it compiles; this proves the result actually
       # starts on this architecture, which is the thing #266 asked for.
       - name: Verify the image runs on ${{ matrix.platform }}
         run: |
+          expected="$(tr -d '\r\n' < .nvmrc)"
           docker run --rm --platform ${{ matrix.platform }} \
             --entrypoint node autotask-mcp:test \
-            -e "console.log('node ' + process.version + ' on ' + process.arch)"
+            -e 'if (process.versions.node !== process.argv[1]) process.exit(1); console.log(process.version + " on " + process.arch)' "$expected"
 
   code-quality:
     name: Code Quality
@@ -95,6 +103,8 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
@@ -103,16 +113,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: '20.x'
+          node-version-file: .nvmrc
           cache: 'npm'
+          registry-url: https://npm.pkg.github.com
 
       - name: Configure npm for GitHub Packages
         run: |
-          echo "@wyre-ai:registry=https://npm.pkg.github.com" >> .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+          npm config set --location=user @wyre-ai:registry https://npm.pkg.github.com
+          npm config set --location=user @wyre-technology:registry https://npm.pkg.github.com
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run linter
         run: npm run lint
@@ -133,4 +144,4 @@ jobs:
           files: ./coverage/lcov.info
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: false 
+          fail_ci_if_error: false

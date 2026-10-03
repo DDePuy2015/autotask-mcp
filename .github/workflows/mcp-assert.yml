@@ -10,5 +10,6 @@ jobs:
   assert:
     uses: wyre-technology/.github/.github/workflows/mcp-assert.yml@7542c27000cf8d213c4910b4f397637b105a718b  # main
     with:
+      node-version: '22.23.1'
       entry: dist/entry.js
       canary-tool: autotask_test_connection
