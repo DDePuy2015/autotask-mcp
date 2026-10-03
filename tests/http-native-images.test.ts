@@ -24,7 +24,12 @@ describe('native image responses over authenticated provider HTTP', () => {
       if (url.hostname === '127.0.0.1') return localFetch(input, init);
       if (url.hostname !== 'image-http.invalid') throw new Error('Unexpected outbound request');
       upstreamCalls++;
-      if (/\/Ticket(?:Note)?Attachments\/456$/.test(url.pathname)) return new Response(JSON.stringify({ item: attachment }));
+      if (/\/(TicketNoteAttachments|TicketNotes\/789\/Attachments)\/456$/.test(url.pathname)) {
+        return new Response(JSON.stringify({ items: [{ ...attachment, parentID: 789 }], pageDetails: { count: 1, requestCount: 1, nextPageUrl: null } }));
+      }
+      if (/\/(TicketAttachments|Tickets\/123\/Attachments)\/456$/.test(url.pathname)) {
+        return new Response(JSON.stringify({ items: [{ ...attachment, ticketNoteID: null, parentID: 123 }], pageDetails: { count: 1, requestCount: 1, nextPageUrl: null } }));
+      }
       throw new Error('Unexpected Autotask endpoint');
     });
     const env: EnvironmentConfig = {
@@ -67,6 +72,14 @@ describe('native image responses over authenticated provider HTTP', () => {
     const response = await request('tools/call', { name: 'autotask_get_ticket_note_attachment', arguments: { ticketId: 123, ticketNoteId: 789, attachmentId: 456, includeData: true } });
     const body = await rpcBody(response);
     expect(body.result.content[1]?.type).toBe('image');
+    expect(upstreamCalls).toBe(1);
+  });
+  test('metadata response never includes base64 from the child items row', async () => {
+    const response = await request('tools/call', { name: 'autotask_get_ticket_attachment', arguments: { ticketId: 123, attachmentId: 456 } });
+    const body = await rpcBody(response);
+    expect(body.result.isError).not.toBe(true);
+    expect(body.result.content).toHaveLength(1);
+    expect(JSON.stringify(body)).not.toContain(IMAGE);
     expect(upstreamCalls).toBe(1);
   });
   test('wrong parent produces only an error over HTTP', async () => {

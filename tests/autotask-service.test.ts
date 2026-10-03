@@ -211,32 +211,32 @@ describe('AutotaskService', () => {
         jest.restoreAllMocks();
       });
 
-      test('includeData=false hits the child endpoint and returns metadata only', async () => {
+      test('includeData=false unwraps child items and returns metadata only', async () => {
+        const data = Buffer.from('hello').toString('base64');
         const fetchSpy = jest
           .spyOn(globalThis, 'fetch')
-          .mockResolvedValue(jsonResponse({ item: { id: 456, ticketID: 123, fileName: 'a.pdf', fileSize: 100 } }));
+          .mockResolvedValue(jsonResponse({ items: [{ id: 456, ticketID: 123, fileName: 'a.pdf', fileSize: 100, data }], pageDetails: { count: 1, nextPageUrl: null } }));
 
         const r = await service.getTicketAttachment(123, 456);
 
         expect(r).toEqual({ id: 456, ticketID: 123, fileName: 'a.pdf', fileSize: 100 });
         expect(fetchSpy).toHaveBeenCalledTimes(1);
         const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-        // Child endpoint — never returns the binary `data` field
+        // Child detail can contain data; the metadata result must remove it.
         expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/Tickets/123/Attachments/456');
       });
 
-      test('includeData=true hits the top-level entity endpoint and returns data', async () => {
+      test('includeData=true unwraps the top-level detail endpoint and returns data', async () => {
         const smallBase64 = Buffer.from('hello').toString('base64');
         const fetchSpy = jest
           .spyOn(globalThis, 'fetch')
-          .mockResolvedValue(jsonResponse({ item: { id: 456, ticketID: 123, fileName: 'a.pdf', data: smallBase64 } }));
+          .mockResolvedValue(jsonResponse({ items: [{ id: 456, ticketID: 123, fileName: 'a.pdf', data: smallBase64 }], pageDetails: { count: 1, nextPageUrl: null } }));
 
         const r = await service.getTicketAttachment(123, 456, { includeData: true });
 
         expect(r?.data).toBe(smallBase64);
         expect(r?.dataOmittedReason).toBeUndefined();
         const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-        // Top-level entity endpoint — the only one that populates `data`
         expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketAttachments/456');
       });
 
@@ -304,32 +304,32 @@ describe('AutotaskService', () => {
         jest.restoreAllMocks();
       });
 
-      test('includeData=false hits the child endpoint and returns metadata only', async () => {
+      test('includeData=false unwraps child items and returns metadata only', async () => {
+        const data = Buffer.from('hello').toString('base64');
         const fetchSpy = jest
           .spyOn(globalThis, 'fetch')
-          .mockResolvedValue(jsonResponse({ item: { id: 456, ticketNoteID: 123, title: 'a.pdf', fileSize: 100 } }));
+          .mockResolvedValue(jsonResponse({ items: [{ id: 456, ticketNoteID: 123, title: 'a.pdf', fileSize: 100, data }], pageDetails: { count: 1, nextPageUrl: null } }));
 
         const r = await service.getTicketNoteAttachment(123, 456);
 
         expect(r).toEqual({ id: 456, ticketNoteID: 123, title: 'a.pdf', fileSize: 100 });
         expect(fetchSpy).toHaveBeenCalledTimes(1);
         const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-        // Child endpoint — never returns the binary `data` field
+        // Child detail can contain data; the metadata result must remove it.
         expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketNotes/123/Attachments/456');
       });
 
-      test('includeData=true hits the top-level entity endpoint and returns data', async () => {
+      test('includeData=true unwraps the note top-level detail endpoint and returns data', async () => {
         const smallBase64 = Buffer.from('hello').toString('base64');
         const fetchSpy = jest
           .spyOn(globalThis, 'fetch')
-          .mockResolvedValue(jsonResponse({ item: { id: 456, ticketNoteID: 123, title: 'a.pdf', data: smallBase64 } }));
+          .mockResolvedValue(jsonResponse({ items: [{ id: 456, ticketNoteID: 123, title: 'a.pdf', data: smallBase64 }], pageDetails: { count: 1, nextPageUrl: null } }));
 
         const r = await service.getTicketNoteAttachment(123, 456, { includeData: true });
 
         expect(r?.data).toBe(smallBase64);
         expect(r?.dataOmittedReason).toBeUndefined();
         const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-        // Top-level entity endpoint — the only one that populates `data`
         expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketNoteAttachments/456');
       });
 

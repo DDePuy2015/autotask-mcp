@@ -8,6 +8,10 @@ export const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8
 const WEBP = 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA';
 const JPEG = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD9U6KKKAP/2Q==';
 const attachment = { id: 456, ticketID: 123, ticketNoteID: 789, fileName: 'fixture.png', contentType: 'image/png', data: PNG };
+const childDetail = (row: Record<string, unknown>) => ({
+  items: [row],
+  pageDetails: { count: 1, requestCount: 1, prevPageUrl: null, nextPageUrl: null },
+});
 const config: McpServerConfig = { name: 'image-test', version: '0', autotask: {
   username: 'synthetic', secret: 'synthetic', integrationCode: 'synthetic', apiUrl: 'https://images.invalid/atservicesrest/',
 } };
@@ -96,7 +100,7 @@ describe('attachment service and MCP tool ownership', () => {
     handler = new AutotaskToolHandler(service, logger, true);
     fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(async url => {
       if (!String(url).startsWith('https://images.invalid/')) throw new Error('Unexpected outbound request');
-      return new Response(JSON.stringify({ item: attachment }));
+      return new Response(JSON.stringify(childDetail(attachment)));
     });
   });
   afterEach(() => jest.restoreAllMocks());
@@ -109,30 +113,60 @@ describe('attachment service and MCP tool ownership', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0]![0])).toMatch(/\/Ticket(?:Note)?Attachments\/456$/);
   });
+  test('live-shaped one-row JPEG response becomes a native image', async () => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, parentID: 123, ticketNoteID: null, fullPath: 'fixture.jpg', contentType: 'image/jpeg', data: JPEG }))));
+    const result = await handler.callTool('autotask_get_ticket_attachment', { ticketId: 123, attachmentId: 456, includeData: true });
+    expect(result.isError).not.toBe(true);
+    expect(result.content[1]).toEqual({ type: 'image', data: JPEG, mimeType: 'image/jpeg' });
+    expect(result.content[0].text).not.toContain(JPEG);
+  });
   test('ticket-note image requires parent ticketId', async () => {
     const result = await handler.callTool('autotask_get_ticket_note_attachment', { ticketNoteId: 789, attachmentId: 456, includeData: true });
     expect(result.isError).toBe(true);
     expect(result.content).toHaveLength(1);
     expect(result.content[0].text).not.toContain(PNG);
   });
-  test.each([{ ticketID: undefined }, { ticketID: '123' }, { ticketID: 124 }, { id: 999 }])('global ticket attachment rejects unverified ownership: %j', async fields => {
-    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ item: { ...attachment, ...fields } })));
+  test.each([{ ticketID: undefined }, { ticketID: '123' }, { ticketID: 124 }, { parentID: 999, ticketNoteID: null }, { id: 999 }])('ticket attachment rejects unverified ownership: %j', async fields => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, ...fields }))));
     expect(await service.getTicketAttachment(123, 456, { includeData: true })).toBeNull();
   });
-  test.each([{ ticketNoteID: undefined }, { ticketNoteID: '789' }, { ticketNoteID: 790 }, { ticketID: undefined }, { ticketID: 124 }, { id: 999 }])('global note attachment rejects unverified ownership: %j', async fields => {
-    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ item: { ...attachment, ...fields } })));
+  test.each([{ ticketNoteID: undefined }, { ticketNoteID: '789' }, { ticketNoteID: 790 }, { ticketID: undefined }, { ticketID: 124 }, { parentID: 999 }, { id: 999 }])('note attachment rejects unverified ownership: %j', async fields => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, ...fields }))));
     expect(await service.getTicketNoteAttachment(789, 456, { ticketId: 123, includeData: true })).toBeNull();
   });
-  test.each(['autotask_get_ticket_attachment', 'autotask_get_ticket_note_attachment'])('%s metadata path uses only the child route and strips unexpected bytes', async name => {
+  test.each(['autotask_get_ticket_attachment', 'autotask_get_ticket_note_attachment'])('%s metadata path strips bytes inside child items', async name => {
     const result = await handler.callTool(name, { ticketId: 123, ticketNoteId: 789, attachmentId: 456 });
     expect(result.content).toHaveLength(1);
     expect(result.content[0].text).not.toContain(PNG);
+    expect(JSON.parse(result.content[0].text).data).not.toHaveProperty('data');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0]![0])).toMatch(/\/(Tickets\/123|TicketNotes\/789)\/Attachments\/456$/);
   });
+  test.each([
+    { items: [], pageDetails: { count: 0 } },
+    { items: [attachment, attachment], pageDetails: { count: 2 } },
+    { items: [attachment], pageDetails: { count: 2 } },
+    { items: [attachment], pageDetails: { count: 1, requestCount: 2 } },
+    { items: [attachment], pageDetails: { count: 1, nextPageUrl: '/next' } },
+    { items: [attachment], item: attachment },
+    { item: attachment, pageDetails: { count: 1 } },
+  ])('ambiguous child response fails closed without image content: %j', async response => {
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(response)));
+    const result = await handler.callTool('autotask_get_ticket_attachment', { ticketId: 123, attachmentId: 456, includeData: true });
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text).not.toContain(PNG);
+  });
+  test('non-image attachments retain the base64 response contract', async () => {
+    const data = 'JVBERi0xLjQ=';
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, contentType: 'application/pdf', fileName: 'fixture.pdf', data }))));
+    const result = await handler.callTool('autotask_get_ticket_attachment', { ticketId: 123, attachmentId: 456, includeData: true });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text).toContain(data);
+  });
   test('maxInlineBase64Bytes cannot raise the native image limit', async () => {
     const bytes = Buffer.alloc(MAX_NATIVE_IMAGE_BYTES + 1); Buffer.from(PNG, 'base64').copy(bytes);
-    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ item: { ...attachment, data: bytes.toString('base64') } })));
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, data: bytes.toString('base64') }))));
     const result = await handler.callTool('autotask_get_ticket_attachment', { ticketId: 123, attachmentId: 456, includeData: true, maxInlineBase64Bytes: 3000000 });
     expect(result.isError).toBe(true); expect(result.content).toHaveLength(1);
     expect(result.content[0].text).toContain('512 KiB');

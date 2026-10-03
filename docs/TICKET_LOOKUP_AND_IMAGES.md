@@ -10,7 +10,9 @@ A complete dotted ticket number in `autotask_search_tickets.searchTerm` now uses
 
 ## Attachment content
 
-Metadata-only requests use child routes and strip unexpected binary content. Content requests verify the returned attachment ID and parent identity. Ticket-note image requests also require `ticketId` and verify both parent ticket and note. Unverified ownership returns no content.
+Attachment detail GETs can return one row in an `items`/`pageDetails` envelope, including base64 `data` even on a child route. Both metadata and content requests unwrap exactly one row, reject ambiguous envelopes, and verify its attachment ID and parent fields. Metadata-only requests strip `data` from that row. Ticket-note image requests also require `ticketId` and verify both parent ticket and note. Unverified ownership returns no content. The content requests keep their existing top-level attachment routes.
+
+This handling addresses the zero-traffic candidate's live JPEG fixture: the API returned a one-row envelope, while the old service compared `id` and `ticketID` on the outer envelope. The fixture's row carried matching `id`, `ticketID`, and `parentID`; its metadata-only child call used the same envelope. Synthetic regression responses mirror that shape without recording customer IDs or image bytes. A new live image probe is still required before promotion.
 
 Supported images return text metadata followed by a native MCP `{type: "image", data, mimeType}` block. The image bytes are absent from the JSON text metadata. Non-image files retain their base64 download contract. PNG, JPEG and static WebP are supported; animated PNG/WebP and other image types fail safely. No codec dependency is introduced.
 
