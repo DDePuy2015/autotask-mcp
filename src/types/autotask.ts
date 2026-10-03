@@ -360,6 +360,12 @@ export interface AutotaskCompanyNote {
 export interface AutotaskTicketAttachment {
   id?: number;
   ticketID?: number;
+  parentID?: number;
+  parentAttachmentID?: number;
+  ticketNoteID?: number;
+  timeEntryID?: number;
+  title?: string;
+  fullPath?: string;
   fileName?: string;
   fileSize?: number;
   contentType?: string;
@@ -395,6 +401,8 @@ export interface AutotaskTicketNoteAttachment {
   id?: number;
   ticketID?: number;
   ticketNoteID?: number;
+  parentID?: number;
+  parentAttachmentID?: number;
   title?: string;
   fullPath?: string;
   fileSize?: number;

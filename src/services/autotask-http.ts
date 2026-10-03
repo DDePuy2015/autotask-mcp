@@ -356,13 +356,14 @@ export class AutotaskHttpClient {
   }
 
   /**
-   * GET /{Entity}/{id} — returns the entity, or null on 404.
+   * GET /{Entity}/{id} — returns the entity, or null on 404. Attachment
+   * callers can keep the raw envelope to validate single-row responses.
    */
-  async get<T>(entity: string, id: number): Promise<T | null> {
+  async get<T>(entity: string, id: number, options: { unwrapItem?: boolean } = {}): Promise<T | null> {
     try {
       const res = await this.request<{ item?: T } & T>('GET', `/${entity}/${id}`);
       // Autotask returns { item: {...} } but some legacy routes return the entity at top level.
-      return ((res as any)?.item ?? (res as any)) || null;
+      return (options.unwrapItem === false ? res : ((res as any)?.item ?? (res as any))) || null;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('HTTP 404')) return null;
@@ -495,20 +496,22 @@ export class AutotaskHttpClient {
   }
 
   /**
-   * GET /{ParentEntity}/{parentId}/{ChildEntity}/{childId}
+   * GET /{ParentEntity}/{parentId}/{ChildEntity}/{childId}. Attachment
+   * callers can keep the raw envelope to validate single-row responses.
    */
   async childGet<T>(
     parentEntity: string,
     parentId: number,
     childEntity: string,
-    childId: number
+    childId: number,
+    options: { unwrapItem?: boolean } = {}
   ): Promise<T | null> {
     try {
       const res = await this.request<{ item?: T } & T>(
         'GET',
         `/${parentEntity}/${parentId}/${childEntity}/${childId}`
       );
-      return ((res as any)?.item ?? (res as any)) || null;
+      return (options.unwrapItem === false ? res : ((res as any)?.item ?? (res as any))) || null;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('HTTP 404')) return null;

@@ -1947,6 +1947,33 @@ export class AutotaskService {
   // Ticket Attachments (child of Tickets)
   // =====================================================
 
+  // An attachment detail GET can return { items: [row], pageDetails }
+  // rather than the usual { item: row }. Never treat a collection wrapper or
+  // an ambiguous result as an attachment: it may contain binary data.
+  private static attachmentRow<T>(response: unknown): T | null {
+    if (!response || typeof response !== 'object' || Array.isArray(response)) return null;
+    const envelope = response as Record<string, unknown>;
+    let row: unknown = response;
+    if ('items' in envelope) {
+      if (!Array.isArray(envelope.items) || envelope.items.length !== 1 || 'item' in envelope) return null;
+      const page = envelope.pageDetails;
+      if (page !== undefined) {
+        if (!page || typeof page !== 'object' || Array.isArray(page)) return null;
+        const details = page as Record<string, unknown>;
+        if (('count' in details && details.count !== 1) ||
+            ('requestCount' in details && details.requestCount !== 1) ||
+            details.prevPageUrl != null || details.nextPageUrl != null) return null;
+      }
+      row = envelope.items[0];
+    } else if ('item' in envelope) {
+      if ('pageDetails' in envelope) return null;
+      row = envelope.item;
+    } else if ('pageDetails' in envelope) {
+      return null;
+    }
+    return row && typeof row === 'object' && !Array.isArray(row) ? row as T : null;
+  }
+
   // Default cap on inline attachment data (base64-encoded length). 750 KB of
   // base64 ≈ 560 KB raw, leaving headroom for the JSON envelope under typical
   // MCP client tool-result limits (~1 MB). Callable overrides via options.
@@ -1969,32 +1996,26 @@ export class AutotaskService {
         `Getting ticket attachment - TicketID: ${ticketId}, AttachmentID: ${attachmentId}, includeData: ${includeData}`
       );
 
-      if (!includeData) {
-        // The child endpoint never populates the `data` field — using it for
-        // the metadata-only path sidesteps the binary download entirely.
-        const metadata = await http.childGet<AutotaskTicketAttachment>(
-          'Tickets',
-          ticketId,
-          'Attachments',
-          attachmentId
-        );
-        if (!metadata) return null;
-        const { data: _data, ...rest } = metadata;
-        return rest;
-      }
-
-      // Only the top-level entity endpoint populates `data`; the child endpoint
-      // omits it regardless of any query parameters.
-      const attachment = await http.get<AutotaskTicketAttachment>('TicketAttachments', attachmentId);
+      const response = includeData
+        ? await http.get<unknown>('TicketAttachments', attachmentId, { unwrapItem: false })
+        : await http.childGet<unknown>('Tickets', ticketId, 'Attachments', attachmentId, { unwrapItem: false });
+      const attachment = AutotaskService.attachmentRow<AutotaskTicketAttachment>(response);
       if (!attachment) return null;
 
-      // The top-level endpoint accepts any attachment ID, so we have to enforce
-      // parent scope ourselves to honor the (ticketId, attachmentId) contract.
-      if (attachment.ticketID !== ticketId || attachment.id !== attachmentId) {
+      // Autotask can select by attachment ID even on a child route. The
+      // returned identity and ticket parent must both match explicitly.
+      const parentId = attachment.parentAttachmentID ?? attachment.ticketNoteID ?? attachment.timeEntryID ?? ticketId;
+      if (attachment.ticketID !== ticketId || attachment.id !== attachmentId ||
+          (attachment.parentID != null && attachment.parentID !== parentId)) {
         this.logger.warn(
           `Ticket attachment ${attachmentId} could not be verified for ticket ${ticketId}. Returning null.`
         );
         return null;
+      }
+
+      if (!includeData) {
+        const { data: _data, ...metadata } = attachment;
+        return metadata;
       }
 
       // Oversized binaries arrive truncated/garbled at the MCP client. Strip
@@ -2049,24 +2070,15 @@ export class AutotaskService {
   // Attachments/pasted images on a NOTE, not the ticket itself — closes the
   // gap where a note's `description` is empty but the note actually carries
   // one or more files/screenshots in the Autotask UI (autotask-mcp#297).
-  // Same top-level-populates-data / child-omits-data split as
-  // getTicketAttachment above: verified live against
-  // /TicketNoteAttachments/entityInformation/fields (field names differ from
-  // AutotaskTicketAttachment — title/fullPath/attachDate here, not
-  // fileName/createDate), but no live note with an actual attachment was
-  // available to empirically confirm the child endpoint omits `data` the
-  // same way it does for ticket attachments — the split is applied on the
-  // strength of Autotask's consistent attachment-entity design, not a
-  // second empirical reproduction.
+  // Child detail responses can contain `data` inside an `items` envelope, so
+  // metadata requests must unwrap, verify ownership and strip it as well.
   // =====================================================
 
   /**
    * Get an attachment on a ticket note. With `includeData` false (default),
-   * hits the cheap `TicketNotes/{id}/Attachments/{id}` child endpoint and
-   * returns metadata only — it never populates `data` regardless of query
-   * parameters. With `includeData` true, hits the top-level
-   * `TicketNoteAttachments/{id}` entity (the only endpoint that populates
-   * `data`) and enforces that the attachment actually belongs to
+   * hits `TicketNotes/{id}/Attachments/{id}` and returns metadata only.
+   * With `includeData` true, the top-level entity supplies `data`. Both
+   * paths verify that the attachment actually belongs to
    * `ticketNoteId` — `ticketNoteID` is an optional field on this entity
    * (Autotask's own field metadata marks it `isRequired: false`, since a
    * TicketNoteAttachment-shaped row can in principle belong to a different
@@ -2098,27 +2110,14 @@ export class AutotaskService {
         `Getting ticket note attachment - TicketNoteID: ${ticketNoteId}, AttachmentID: ${attachmentId}, includeData: ${includeData}`
       );
 
-      if (!includeData) {
-        // The child endpoint never populates the `data` field — using it for
-        // the metadata-only path sidesteps the binary download entirely.
-        const metadata = await http.childGet<AutotaskTicketNoteAttachment>(
-          'TicketNotes',
-          ticketNoteId,
-          'Attachments',
-          attachmentId
-        );
-        if (!metadata) return null;
-        const { data: _data, ...rest } = metadata;
-        return rest;
-      }
-
-      // Only the top-level entity endpoint populates `data`; the child endpoint
-      // omits it regardless of any query parameters.
-      const attachment = await http.get<AutotaskTicketNoteAttachment>('TicketNoteAttachments', attachmentId);
+      const response = includeData
+        ? await http.get<unknown>('TicketNoteAttachments', attachmentId, { unwrapItem: false })
+        : await http.childGet<unknown>('TicketNotes', ticketNoteId, 'Attachments', attachmentId, { unwrapItem: false });
+      const attachment = AutotaskService.attachmentRow<AutotaskTicketNoteAttachment>(response);
       if (!attachment) return null;
 
-      // The top-level endpoint accepts any attachment ID, so we have to enforce
-      // parent scope ourselves to honor the (ticketNoteId, attachmentId) contract.
+      // An attachment ID alone does not prove scope, so enforce the returned
+      // note, ticket and attachment IDs.
       // Fail CLOSED: ticketNoteID is documented as optional on this entity
       // (Autotask field metadata: isRequired: false), so a row that omits it
       // must be rejected too, not passed through because it isn't a
@@ -2126,12 +2125,19 @@ export class AutotaskService {
       // AND mismatched values in one check — the earlier `typeof === 'number'
       // && !==` form let an attachment with no ticketNoteID through
       // unverified (CodeRabbit PR #300 review).
+      const parentId = attachment.parentAttachmentID ?? ticketNoteId;
       if (attachment.ticketNoteID !== ticketNoteId || attachment.id !== attachmentId ||
-          (options.ticketId !== undefined && attachment.ticketID !== options.ticketId)) {
+          (options.ticketId !== undefined && attachment.ticketID !== options.ticketId) ||
+          (attachment.parentID != null && attachment.parentID !== parentId)) {
         this.logger.warn(
           `Ticket note attachment ${attachmentId} could not be verified for note ${ticketNoteId}. Returning null.`
         );
         return null;
+      }
+
+      if (!includeData) {
+        const { data: _data, ...metadata } = attachment;
+        return metadata;
       }
 
       // Oversized binaries arrive truncated/garbled at the MCP client. Strip
