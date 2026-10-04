@@ -48,6 +48,11 @@ invalid records, repeated cursors, exhausted budgets, and vendor API failures
 return errors rather than claiming a missing or resolved company. HTTP 429
 keeps the existing typed rate-limit envelope and retry guidance.
 
+The official [Autotask query contract](https://ww1.autotask.net/help/DeveloperHelp/Content/APIs/REST/API_Calls/REST_Basic_Query_Calls.htm)
+defines exact `eq` and partial `contains` matching, and specifies that pagination
+URLs are URLs or null. The strict resolver requires that terminal marker rather
+than interpreting missing metadata as proof of exhaustion.
+
 This change builds on the fork's existing zero-ID protection without duplicating
 it: explicit and resolved `companyID: 0` remain filters and do not trigger the
 zero-filter date prompt. Company searches do not silently exclude inactive

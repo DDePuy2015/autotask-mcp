@@ -1,6 +1,6 @@
 import type { CompanyNameResolution } from '../utils/company-resolution.js';
 
-const TICKET_PREFIX = /^T\d{6,8}(?:\.\d*)?$/i;
+const TICKET_PREFIX = /^T\d{1,8}(?:\.\d+)?$/i;
 const DATE_PHRASE = /\s+(?:(?:created|completed|closed|updated|last\s+updated)\s+)?(?:(?:in|during|on|since|before|after|from)\s+)?(?:the\s+)?(?:today|yesterday|tomorrow|(?:last|past|this|previous|next)\s+(?:(?:\d+|seven)\s+)?(?:days?|weeks?|months?|quarters?|years?)|\d{4}-\d{2}-\d{2})\b/i;
 const NON_COMPANY = /^(?:me|us|them|all|open|closed|new|today|yesterday|tomorrow|(?:last|past|this|previous|next)\s+(?:(?:\d+|seven)\s+)?(?:days?|weeks?|months?|quarters?|years?))$/i;
 
@@ -41,7 +41,7 @@ export function extractTicketSearchNumber(intent: string, full = false): string 
   const scope = company.kind === 'name' ? intent.replace(company.name, '') : intent;
   const pattern = full
     ? /(?:^|[\s"'])(T\d{8}\.\d{4,})(?=$|[\s"',;!?]|\.(?!\d))/i
-    : /(?:^|[\s"'])(T\d{6,8}(?:\.\d+)?)(?=$|[\s"',;!?]|\.(?!\d))/i;
+    : /(?:^|[\s"'])(T\d{1,8}(?:\.\d+)?)(?=$|[\s"',;!?]|\.(?!\d))/i;
   return scope.match(pattern)?.[1]?.toUpperCase();
 }
 

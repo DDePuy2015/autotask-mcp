@@ -7,8 +7,8 @@
 // deps — only Node 18+ built-in `fetch` via AutotaskHttpClient.
 
 import { resolveAutotaskApiUrl } from '../utils/config';
-import { normalizeCompanyName, type CompanyCandidate, type CompanyNameResolution } from '../utils/company-resolution';
 import { AutotaskHttpClient, QueryFilter } from './autotask-http';
+import { normalizeCompanyName, type CompanyCandidate, type CompanyNameResolution } from '../utils/company-resolution';
 import {
   AutotaskContractService,
   AutotaskContractServiceUnit,

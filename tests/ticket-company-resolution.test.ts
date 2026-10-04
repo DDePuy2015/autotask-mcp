@@ -181,10 +181,10 @@ describe('ticket company intent routing', () => {
   test('a ticket prefix and an independently named company retain both scopes', async () => {
     expect((await route('tickets T20261003 at Acme')).suggestedParams).toEqual({ searchTerm: 'T20261003', companyID: 42 });
   });
-  test.each(['search tickets for T20261003', 'find tickets for "t20261003"', 'tickets T20261003.00 last week'])('%s preserves a ticket-number prefix', async intent => {
+  test.each(['search tickets for T20261003', 'find tickets for "t20261003"', 'tickets T20261003.00 last week', 'search tickets for T2026'])('%s preserves a ticket-number prefix', async intent => {
     const result = await route(intent);
     expect(result.suggestedTool).toBe('autotask_search_tickets');
-    expect(result.suggestedParams.searchTerm).toMatch(/^T20261003(?:\.00)?$/);
+    expect(result.suggestedParams.searchTerm).toMatch(/^T2026(?:1003(?:\.00)?)?$/);
     expect(result.suggestedParams).not.toHaveProperty('companyID');
     expect(result.requiredParams).toEqual([]);
     expect(resolve).not.toHaveBeenCalled();
