@@ -6,6 +6,10 @@
 
 ### Added
 
+- Structured `relativeDateRange` ticket searches for `today`, `last7days` (seven local dates including today), and `lastweek` (previous complete calendar week). Explicit created/completed/last-updated field selection, configurable IANA timezone/week start, UTC inclusive-start/exclusive-end bounds, deterministic clock injection, and DST/calendar regression coverage. Completion-date queries include completed tickets unless an explicit status is supplied. Legacy explicit-date inputs and direct ticket lookups retain their behavior.
+
+### Added
+
 - **Ticket note attachments (read-only)**. Attachments and pasted images on a ticket **note** — files and screenshots pasted directly into an internal note in the Autotask UI — were previously invisible: only ticket-level attachments were reachable, and a note carrying one or more images looked like an empty note (`description: ""`). `autotask_get_ticket_note_attachment` / `autotask_search_ticket_note_attachments` mirror the existing ticket-attachment tool pair exactly, including the `includeData`/`maxInlineBase64Bytes`/`dataOmittedReason` contract, against the `TicketNoteAttachments` entity (verified live against Autotask's own `/TicketNoteAttachments/entityInformation/fields` — the top-level endpoint populates `data`, the child endpoint does not, same split as ticket attachments). Fixes #297.
 - **Contract service lines and billed units (read-only)**. Five tools close the gap between a contract header and what is actually invoiced:
   - `autotask_search_contract_services` / `autotask_search_contract_service_bundles` — the service and bundle line items on a contract, with contract-specific unit price.

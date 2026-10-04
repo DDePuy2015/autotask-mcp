@@ -7,6 +7,7 @@
 // deps — only Node 18+ built-in `fetch` via AutotaskHttpClient.
 
 import { resolveAutotaskApiUrl } from '../utils/config';
+import { resolveTicketDateRange } from '../utils/relative-date-range';
 import { AutotaskHttpClient, QueryFilter } from './autotask-http';
 import { normalizeCompanyName, type CompanyCandidate, type CompanyNameResolution } from '../utils/company-resolution';
 import {
@@ -141,7 +142,7 @@ export class AutotaskService {
   private config: McpServerConfig;
   private initializationPromise: Promise<void> | null = null;
 
-  constructor(config: McpServerConfig, logger: Logger) {
+  constructor(config: McpServerConfig, logger: Logger, private readonly clock: () => Date = () => new Date()) {
     this.config = config;
     this.logger = logger;
   }
@@ -492,6 +493,7 @@ export class AutotaskService {
   }
 
   async searchTickets(options: AutotaskQueryOptionsExtended = {}): Promise<AutotaskTicket[]> {
+    const dateRange = resolveTicketDateRange(options, this.config.dateRanges, this.clock);
     const http = await this.ensureClient();
     try {
       this.logger.debug('Searching tickets with options:', options);
@@ -509,7 +511,7 @@ export class AutotaskService {
 
       if (options.status !== undefined) {
         filters.push({ op: 'eq', field: 'status', value: options.status });
-      } else if (!exactNumber) {
+      } else if (!exactNumber && dateRange?.field !== 'completedDate') {
         filters.push({ op: 'noteq', field: 'status', value: 5 }); // 5 = Complete (Autotask REST uses 'noteq', not 'ne')
       }
 
@@ -546,6 +548,7 @@ export class AutotaskService {
       if (options.lastActivityAfter) {
         filters.push({ op: 'gte', field: 'lastActivityDate', value: options.lastActivityAfter });
       }
+      if (dateRange) filters.push(...dateRange.filters);
 
       const pageSize = Math.min(options.pageSize || 25, 500);
       const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords: pageSize });
