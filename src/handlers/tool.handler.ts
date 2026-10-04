@@ -13,6 +13,7 @@ import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
 import { buildTicketCard } from './card.builder.js';
 import { normalizeTicketNumber, requirePositiveId } from '../utils/ticket-identifier.js';
 import { prepareAttachmentImage, type NativeImageContent } from '../utils/attachment-image.js';
+import { buildTicketSearchRoute, extractTicketId, extractTicketSearchNumber, ticketOperationIntent, type TicketSearchRoute } from './ticket-search-intent.js';
 
 // Default concurrency for company/resource name enrichment. Autotask allows
 // only a handful of concurrent API threads per integration, so enrichment is
@@ -427,12 +428,13 @@ export class AutotaskToolHandler {
   /**
    * Route a natural-language intent to the best matching tool with pre-filled parameters.
    */
-  private routeIntent(rawIntent: string): {
+  private async routeIntent(rawIntent: string): Promise<{
     suggestedTool: string;
     suggestedParams: Record<string, any>;
     description: string;
     requiredParams: string[];
-  } {
+    clarification?: TicketSearchRoute['clarification'];
+  }> {
     // Extract quoted strings from original (preserves case) before lowercasing
     const quotedStrings = rawIntent.match(/["']([^"']+)["']/g)?.map(s => s.slice(1, -1)) || [];
     const intent = rawIntent.toLowerCase();
@@ -464,7 +466,8 @@ export class AutotaskToolHandler {
 
     // Ticket operations
     if (/\b(?:tickets?|issues?|requests?)\b/.test(intent)) {
-      if (/\b(?:create|open|new|submit)\b/.test(intent)) {
+      const operation = ticketOperationIntent(intent);
+      if (/\b(?:create|submit)\b|\bopen\s+(?:a\s+)?ticket\b|\bnew\s+(?:service\s+)?ticket\b/.test(operation)) {
         const params: Record<string, any> = {};
         if (numbers[0] !== undefined) params.companyID = numbers[0];
         if (quotedStrings[0]) params.title = quotedStrings[0];
@@ -477,7 +480,7 @@ export class AutotaskToolHandler {
           requiredParams: [...(params.companyID === undefined ? ['companyID'] : []), ...(!params.title ? ['title'] : [])],
         };
       }
-      if (/\b(?:update|change|modify|edit|assign|reassign|close)\b/.test(intent)) {
+      if (/\b(?:update|change|modify|edit|assign|reassign|close)\b/.test(operation)) {
         const params: Record<string, any> = {};
         if (numbers[0]) params.ticketId = numbers[0];
         return {
@@ -487,7 +490,7 @@ export class AutotaskToolHandler {
           requiredParams: !params.ticketId ? ['ticketId'] : [],
         };
       }
-      const exactNumber = rawIntent.match(/\bT\d{8}\.\d{4,}\b/i)?.[0];
+      const exactNumber = extractTicketSearchNumber(rawIntent, true);
       if (exactNumber) {
         return {
           suggestedTool: 'autotask_get_ticket_details',
@@ -496,15 +499,16 @@ export class AutotaskToolHandler {
           requiredParams: [],
         };
       }
-      if (/\b(?:details?|info|view|show|get|find|lookup)\b/.test(intent) && numbers[0]) {
+      const ticketID = extractTicketId(operation);
+      if (/\b(?:details?|info|view|show|get|find|lookup)\b/.test(operation) && ticketID !== undefined) {
         return {
           suggestedTool: 'autotask_get_ticket_details',
-          suggestedParams: { ticketID: numbers[0], fullDetails: true },
+          suggestedParams: { ticketID, fullDetails: true },
           description: 'Get full ticket details by ID',
           requiredParams: [],
         };
       }
-      if (/\b(?:notes?|comments?)\b/.test(intent)) {
+      if (/\b(?:notes?|comments?)\b/.test(operation)) {
         if (/\b(?:add|create|post)\b/.test(intent)) {
           const params: Record<string, any> = {};
           if (numbers[0]) params.ticketId = numbers[0];
@@ -524,19 +528,12 @@ export class AutotaskToolHandler {
           requiredParams: !params.ticketId ? ['ticketId'] : [],
         };
       }
-      // Default: search tickets
-      const params: Record<string, any> = {};
-      if (quotedStrings[0]) params.searchTerm = quotedStrings[0];
-      else if (/for\s+(\w[\w\s]*?)(?:\.|$|,)/i.test(intent)) {
-        const match = intent.match(/for\s+(\w[\w\s]*?)(?:\.|$|,)/i);
-        if (match) params.searchTerm = match[1].trim();
-      }
-      if (numbers[0] !== undefined) params.companyID = numbers[0]; // WYREAI-373
+      const ticketSearch = await buildTicketSearchRoute(rawIntent,
+        name => this.autotaskService.resolveCompanyName(name));
       return {
         suggestedTool: 'autotask_search_tickets',
-        suggestedParams: params,
+        ...ticketSearch,
         description: 'Search for tickets',
-        requiredParams: [],
       };
     }
 
@@ -1638,7 +1635,7 @@ export class AutotaskToolHandler {
       // Intent-based router
       ['autotask_router', async (a) => {
         const rawIntent = a.intent || '';
-        const suggestion = this.routeIntent(rawIntent);
+        const suggestion = await this.routeIntent(rawIntent);
         return { result: suggestion, message: `Suggested tool: ${suggestion.suggestedTool}` };
       }],
     ]);

@@ -124,10 +124,12 @@ describe('Lazy Loading - Tool Handler', () => {
 describe('Decision Tree Router', () => {
   test('should route ticket search intent', async () => {
     const service = new AutotaskService(mockConfig, mockLogger);
+    jest.spyOn(service, 'resolveCompanyName').mockResolvedValue({ status: 'resolved', companyID: 99 });
     const handler = new AutotaskToolHandler(service, mockLogger);
     const result = await handler.callTool('autotask_router', { intent: 'find tickets for Acme Corp' });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.data.suggestedTool).toBe('autotask_search_tickets');
+    expect(parsed.data.suggestedParams).toEqual({ companyID: 99 });
   });
 
   test('should route time entry intent with extracted params', async () => {

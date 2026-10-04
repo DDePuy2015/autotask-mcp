@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Fixed
+
+- Ticket intent routing resolves unique exact company names to `companyID` instead of treating names as ticket-number prefixes. Missing, ambiguous, and partial matches require structured clarification, with bounded candidate previews. Exact-name uniqueness follows pagination and fails closed on incomplete or malformed responses; vendor errors retain their existing envelopes. Existing `companyID: 0`, exact-ticket lookups, and search defaults are preserved. Date ranges remain a separate concern.
+
 ### Added
 
 - **Ticket note attachments (read-only)**. Attachments and pasted images on a ticket **note** — files and screenshots pasted directly into an internal note in the Autotask UI — were previously invisible: only ticket-level attachments were reachable, and a note carrying one or more images looked like an empty note (`description: ""`). `autotask_get_ticket_note_attachment` / `autotask_search_ticket_note_attachments` mirror the existing ticket-attachment tool pair exactly, including the `includeData`/`maxInlineBase64Bytes`/`dataOmittedReason` contract, against the `TicketNoteAttachments` entity (verified live against Autotask's own `/TicketNoteAttachments/entityInformation/fields` — the top-level endpoint populates `data`, the child endpoint does not, same split as ticket attachments). Fixes #297.
