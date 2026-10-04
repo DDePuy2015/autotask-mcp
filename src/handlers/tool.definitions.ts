@@ -2877,7 +2877,7 @@ export const TOOL_DEFINITIONS: McpTool[] = [
   },
   {
     name: 'autotask_router',
-    description: 'Intelligent tool router - describe what you want to do and get the right tool suggestion with pre-filled parameters. Use this when unsure which tool to call.',
+    description: 'Intelligent tool router - describe what you want to do and get the right tool suggestion with pre-filled parameters. Ticket company names resolve only on a unique exact match; satisfy requiredParams and clarification before executing a suggestion. Candidate lists are previews. Date filters must be supplied separately. Use this when unsure which tool to call.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -7,6 +7,7 @@
 // deps — only Node 18+ built-in `fetch` via AutotaskHttpClient.
 
 import { resolveAutotaskApiUrl } from '../utils/config';
+import { normalizeCompanyName, type CompanyCandidate, type CompanyNameResolution } from '../utils/company-resolution';
 import { AutotaskHttpClient, QueryFilter } from './autotask-http';
 import {
   AutotaskContractService,
@@ -261,6 +262,41 @@ export class AutotaskService {
       this.logger.error('Failed to search companies:', error);
       throw error;
     }
+  }
+
+  /** Resolve only a unique exact name. Contains results are a confirmation preview. */
+  async resolveCompanyName(name: string): Promise<CompanyNameResolution> {
+    const needle = name.trim().replace(/\s+/g, ' ');
+    if (!needle || needle.length > 250) throw new Error('Company name must contain 1 to 250 characters.');
+    const http = await this.ensureClient();
+    const query = async (op: 'eq' | 'contains', maxRecords: number): Promise<CompanyCandidate[]> => {
+      const rows = await http.query<AutotaskCompany>('Companies',
+        [{ op, field: 'companyName', value: needle }],
+        { maxRecords, includeFields: ['id', 'companyName'], strictPagination: true, maxPages: 5 });
+      return rows.map(row => {
+        if (!row || !Number.isSafeInteger(row.id) || (row.id as number) < 0 ||
+          typeof row.companyName !== 'string' || !row.companyName.trim()) {
+          throw new Error('Autotask company lookup returned an invalid company record.');
+        }
+        const actual = normalizeCompanyName(row.companyName);
+        const expected = normalizeCompanyName(needle);
+        if (op === 'eq' ? actual !== expected : !actual.includes(expected)) {
+          throw new Error('Autotask company lookup returned a record that does not match the requested name.');
+        }
+        return { id: row.id as number, companyName: row.companyName };
+      });
+    };
+    // A two-row cap is sufficient to disprove uniqueness. With one row, query
+    // follows every cursor to exhaustion; malformed/incomplete pages fail closed.
+    const exact = await query('eq', 2);
+    if (exact.length === 1) return { status: 'resolved', companyID: exact[0].id };
+    const candidates = exact.length > 1 ? exact : await query('contains', 5);
+    return {
+      status: exact.length > 1 ? 'ambiguous' : candidates.length ? 'confirmation_required' : 'not_found',
+      companyName: needle,
+      candidates,
+      candidatesArePreview: true,
+    };
   }
 
   /**

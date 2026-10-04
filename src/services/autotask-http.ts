@@ -20,6 +20,9 @@ export interface QueryOptions {
   maxRecords?: number;
   includeFields?: string[];
   page?: number;
+  /** Internal name resolution must prove exhaustion before selecting one row. */
+  strictPagination?: boolean;
+  maxPages?: number;
 }
 
 interface PageDetails {
@@ -404,8 +407,20 @@ export class AutotaskHttpClient {
     }
 
     const items: T[] = [];
+    const visited = new Set<string>();
+    let pages = 1;
+    const appendPage = (response: QueryResponse<T>) => {
+      if (opts.strictPagination && (
+        !Array.isArray(response?.items) || !response?.pageDetails ||
+        !(response.pageDetails.nextPageUrl === null ||
+          (typeof response.pageDetails.nextPageUrl === 'string' && response.pageDetails.nextPageUrl.length > 0))
+      )) {
+        throw new Error(`Autotask ${entity} query: invalid pagination response; cannot prove a unique match.`);
+      }
+      if (response?.items) items.push(...response.items);
+    };
     let resp = await this.request<QueryResponse<T>>('POST', `/${entity}/query`, body);
-    if (resp?.items) items.push(...resp.items);
+    appendPage(resp);
 
     while (
       resp?.pageDetails?.nextPageUrl &&
@@ -416,8 +431,21 @@ export class AutotaskHttpClient {
       // body as the initial query; a GET returns HTTP 405 ("does not support
       // http method 'GET'"), which silently truncates large result sets (e.g.
       // the company name cache never loads past the first page).
-      resp = await this.request<QueryResponse<T>>('POST', resp.pageDetails.nextPageUrl, body);
-      if (resp?.items) items.push(...resp.items);
+      const next = resp.pageDetails.nextPageUrl;
+      if (opts.strictPagination && next.startsWith('http') &&
+        new URL(next).origin !== new URL(await this.baseUrl()).origin) {
+        throw new Error(`Autotask ${entity} query: refusing a pagination cursor outside the tenant zone.`);
+      }
+      if (opts.strictPagination && visited.has(next)) {
+        throw new Error(`Autotask ${entity} query: repeated pagination cursor; cannot prove a unique match.`);
+      }
+      if (opts.maxPages !== undefined && pages >= opts.maxPages) {
+        throw new Error(`Autotask ${entity} query: pagination budget exceeded; cannot prove a unique match.`);
+      }
+      visited.add(next);
+      pages++;
+      resp = await this.request<QueryResponse<T>>('POST', next, body);
+      appendPage(resp);
     }
 
     return items.slice(0, totalCap);
