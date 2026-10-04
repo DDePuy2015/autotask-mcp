@@ -705,6 +705,7 @@ export interface AutotaskQueryOptionsExtended extends AutotaskQueryOptions {
   assignedResourceID?: number;
   unassigned?: boolean;
   // Date filters for ticket searches
+  relativeDateRange?: import('../utils/relative-date-range').TicketRelativeDateRange;
   createdAfter?: string;
   createdBefore?: string;
   lastActivityAfter?: string;

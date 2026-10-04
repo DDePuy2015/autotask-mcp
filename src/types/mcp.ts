@@ -4,6 +4,8 @@
 export interface McpServerConfig {
   name: string;
   version: string;
+  /** Local-calendar defaults for structured ticket relative-date searches. */
+  dateRanges?: import('../utils/relative-date-range').DateRangeDefaults;
   autotask: {
     username?: string;
     integrationCode?: string;
@@ -18,5 +20,3 @@ export interface McpServerConfig {
     impersonationResourceId?: number;
   };
 }
-
- 
