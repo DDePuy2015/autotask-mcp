@@ -7,12 +7,6 @@
 // answers with "Role does not exist or is invalid" and nothing more.
 // (FellowHire: Synergy Solution IT, sansa-stark, 2026-09-10.)
 
-jest.mock('autotask-node', () => ({
-  AutotaskClient: {
-    create: jest.fn().mockRejectedValue(new Error('Mock: Cannot connect to Autotask API'))
-  }
-}));
-
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from '../src/handlers/tool.definitions';
 import { AutotaskToolHandler } from '../src/handlers/tool.handler';
 import { AutotaskService } from '../src/services/autotask.service';

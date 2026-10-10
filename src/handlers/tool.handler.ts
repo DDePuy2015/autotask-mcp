@@ -1621,15 +1621,6 @@ export class AutotaskToolHandler {
         const tools = TOOL_DEFINITIONS.filter(t => category.tools.includes(t.name));
         return { result: tools, message: `Found ${tools.length} tools in "${a.category}" category` };
       }],
-      ['autotask_execute_tool', async (a) => {
-        const toolName = a.toolName;
-        const toolArgs = a.arguments || {};
-        const handler = this.getDispatchTable().get(toolName);
-        if (!handler) throw new Error(`Unknown tool: ${toolName}`);
-        // Prevent recursive meta-tool calls
-        if (toolName === 'autotask_execute_tool') throw new Error('Cannot recursively execute autotask_execute_tool');
-        return handler(toolArgs);
-      }],
 
       // Intent-based router
       ['autotask_router', async (a) => {
@@ -1689,10 +1680,20 @@ export class AutotaskToolHandler {
     // keep working during the transition. Normalize once, here, rather than
     // at each of the ~20 individual read sites across this file — every
     // handler below can keep reading whichever key it already used.
-    const args = normalizeCompanyIdAlias(rawArgs);
+    const args = normalizeCompanyIdAlias({ ...rawArgs });
     this.logger.debug(`Calling tool: ${name}`, args);
 
     try {
+      if (name === 'autotask_execute_tool') {
+        if (typeof args.toolName !== 'string' || !args.toolName) throw new Error('toolName must be a non-empty string');
+        if (args.toolName === name) throw new Error('Cannot recursively execute autotask_execute_tool');
+        if (args.arguments !== undefined && (!args.arguments || typeof args.arguments !== 'object' || Array.isArray(args.arguments))) {
+          throw new Error('arguments must be an object');
+        }
+        // Reuse the complete direct-call boundary: aliases, compact envelopes,
+        // not-found errors, native media and ticket cards must be identical.
+        return this.callTool(args.toolName, args.arguments ?? {});
+      }
       const handler = this.getDispatchTable().get(name);
       if (!handler) throw new Error(`Unknown tool: ${name}`);
 
