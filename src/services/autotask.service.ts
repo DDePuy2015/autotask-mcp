@@ -390,7 +390,7 @@ export class AutotaskService {
       const contacts = await http.query<AutotaskContact>(
         'Contacts',
         filters.length > 0 ? filters : MATCH_ALL,
-        { maxRecords: pageSize }
+        { maxRecords: pageSize, page: options.page ?? 1 }
       );
 
       this.logger.info(`Retrieved ${contacts.length} contacts (pageSize ${pageSize})`);
@@ -551,7 +551,7 @@ export class AutotaskService {
       if (dateRange) filters.push(...dateRange.filters);
 
       const pageSize = Math.min(options.pageSize || 25, 500);
-      const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords: pageSize });
+      const tickets = await http.query<AutotaskTicket>('Tickets', filters, { maxRecords: pageSize, page: options.page ?? 1 });
       const optimized = tickets.map(t => this.optimizeTicketDataAggressive(t));
 
       this.logger.info(`Retrieved ${optimized.length} tickets (pageSize ${pageSize})`);
@@ -914,7 +914,7 @@ export class AutotaskService {
       const projects = await http.query<AutotaskProject>(
         'Projects',
         filters.length > 0 ? filters : MATCH_ALL,
-        { maxRecords: pageSize }
+        { maxRecords: pageSize, page: options.page ?? 1 }
       );
       const optimized = projects.map(p => this.optimizeProjectData(p));
       this.logger.info(`Retrieved ${optimized.length} projects`);
@@ -1084,7 +1084,7 @@ export class AutotaskService {
       const resources = await http.query<AutotaskResource>(
         'Resources',
         filters.length > 0 ? filters : MATCH_ALL,
-        { maxRecords: pageSize }
+        { maxRecords: pageSize, page: options.page ?? 1 }
       );
       this.logger.info(`Retrieved ${resources.length} resources`);
       return resources;
