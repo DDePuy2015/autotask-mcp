@@ -46,6 +46,8 @@ const RAW_REQUEST_METHODS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] as const;
  * across pages until the caller's `opts.maxRecords` total cap is reached.
  */
 export const AUTOTASK_MAX_PAGE_SIZE = 500;
+/** Offset-style public searches replay cursors; keep their work bounded. */
+export const MAX_SEARCH_PAGE = 50;
 
 /**
  * Thrown when Autotask returns 429 (per-integration API threshold exceeded).
@@ -396,8 +398,18 @@ export class AutotaskHttpClient {
     filter: QueryFilter[],
     opts: QueryOptions = {}
   ): Promise<T[]> {
-    const totalCap = opts.maxRecords ?? AUTOTASK_MAX_PAGE_SIZE;
-    const pageSize = Math.min(totalCap, AUTOTASK_MAX_PAGE_SIZE);
+    const requestedCap = opts.maxRecords ?? AUTOTASK_MAX_PAGE_SIZE;
+    const page = opts.page ?? 1;
+    if (opts.page !== undefined && (
+      !Number.isSafeInteger(page) || page < 1 || page > MAX_SEARCH_PAGE ||
+      !Number.isSafeInteger(requestedCap) || requestedCap < 1 || requestedCap > AUTOTASK_MAX_PAGE_SIZE
+    )) {
+      throw new Error(`Autotask ${entity} query: page must be an integer from 1 to ${MAX_SEARCH_PAGE} and pageSize from 1 to ${AUTOTASK_MAX_PAGE_SIZE}. Narrow the query for deeper results.`);
+    }
+    const totalCap = requestedCap * page;
+    const pageSize = Math.min(requestedCap, AUTOTASK_MAX_PAGE_SIZE);
+    const maxPages = opts.maxPages ?? (opts.page !== undefined ? MAX_SEARCH_PAGE : undefined);
+    const bounded = opts.strictPagination || maxPages !== undefined;
     const body: Record<string, any> = {
       filter,
       MaxRecords: pageSize,
@@ -432,23 +444,30 @@ export class AutotaskHttpClient {
       // http method 'GET'"), which silently truncates large result sets (e.g.
       // the company name cache never loads past the first page).
       const next = resp.pageDetails.nextPageUrl;
-      if (opts.strictPagination && next.startsWith('http') &&
-        new URL(next).origin !== new URL(await this.baseUrl()).origin) {
-        throw new Error(`Autotask ${entity} query: refusing a pagination cursor outside the tenant zone.`);
+      let cursor = next;
+      if (bounded) {
+        const base = await this.baseUrl();
+        const url = new URL(next.startsWith('http') ? next : `${base}${next.startsWith('/') ? '' : '/'}${next}`);
+        const entityQuery = `${new URL(base).pathname}/${entity}/query`;
+        if (url.origin !== new URL(base).origin || url.username || url.password || url.hash ||
+            (url.pathname !== entityQuery && !url.pathname.startsWith(`${entityQuery}/`))) {
+          throw new Error(`Autotask ${entity} query: refusing a pagination cursor outside the tenant zone or entity query.`);
+        }
+        cursor = url.href;
       }
-      if (opts.strictPagination && visited.has(next)) {
+      if (bounded && visited.has(cursor)) {
         throw new Error(`Autotask ${entity} query: repeated pagination cursor; cannot prove a unique match.`);
       }
-      if (opts.maxPages !== undefined && pages >= opts.maxPages) {
+      if (maxPages !== undefined && pages >= maxPages) {
         throw new Error(`Autotask ${entity} query: pagination budget exceeded; cannot prove a unique match.`);
       }
-      visited.add(next);
+      visited.add(cursor);
       pages++;
       resp = await this.request<QueryResponse<T>>('POST', next, body);
       appendPage(resp);
     }
 
-    return items.slice(0, totalCap);
+    return items.slice((page - 1) * requestedCap, totalCap);
   }
 
   /**
