@@ -421,17 +421,14 @@ export class AutotaskService {
       try {
         await http.update('Contacts', id, updates as Record<string, any>);
       } catch (err) {
-        // Some zone hosts register NEITHER route update() tries: the
-        // collection-level PATCH /Contacts returns an HTML 404 (the Zone DE1
-        // behaviour from issue #133) AND the PUT /Contacts/{id} fallback is
-        // rejected with 405 (#197), so every contact update fails with no
-        // workaround. Contacts are a child entity of Companies, so retry
-        // through the documented child route
+        // Some zone hosts reject collection-level PATCH with 404/405.
+        // This is a partial update: a PUT replacement could clear omitted
+        // fields. Contacts are a child entity of Companies, so retry through
+        // the documented child route
         // PATCH /Companies/{companyID}/Contacts — resolving the parent from
         // the update payload when supplied, otherwise from the existing
         // record. The fallback is gated on 404/405 so genuine validation
-        // errors (400/422) surface unchanged, and ordered last so zones where
-        // update() works (including DE1's PUT fallback) keep their behaviour.
+        // errors (400/422) surface unchanged. Healthy zones keep one PATCH.
         const status = (err as { status?: number })?.status;
         if (status !== 404 && status !== 405) throw err;
         let companyID = (updates as Record<string, any>).companyID as number | null | undefined;
@@ -524,7 +521,7 @@ export class AutotaskService {
       }
 
       if (options.unassigned === true) {
-        filters.push({ op: 'eq', field: 'assignedResourceID', value: null });
+        filters.push({ op: 'notExist', field: 'assignedResourceID' });
       } else if (options.assignedResourceID !== undefined) {
         filters.push({ op: 'eq', field: 'assignedResourceID', value: options.assignedResourceID });
       }
@@ -2895,9 +2892,9 @@ export class AutotaskService {
 
       const approvalStatus = (options as any).approvalStatus;
       if (approvalStatus === 'unapproved') {
-        filters.push({ op: 'eq', field: 'billingApprovalDateTime', value: null });
+        filters.push({ op: 'notExist', field: 'billingApprovalDateTime' });
       } else if (approvalStatus === 'approved') {
-        filters.push({ op: 'isnotnull', field: 'billingApprovalDateTime' });
+        filters.push({ op: 'exist', field: 'billingApprovalDateTime' });
       }
 
       if ((options as any).billable !== undefined) {

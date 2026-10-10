@@ -1,13 +1,6 @@
 // Regression tests for PR #197 (follow-up to issue #133):
-// On some Autotask zone hosts BOTH legs of AutotaskHttpClient.update() fail for
-// Contacts — the collection-level `PATCH /Contacts` returns an IIS HTML 404
-// (the Zone DE1 behaviour from #133) AND the `PUT /Contacts/{id}` fallback is
-// rejected with 405 — so every contact update dies with no workaround through
-// the typed tool. Contacts are a child entity of Companies, so
-// AutotaskService.updateContact() now retries through the documented child
-// route `PATCH /Companies/{companyID}/Contacts`, but ONLY after update() fails
-// with 404/405: zones where the standard routes work (most zones, and DE1's
-// PUT fallback) keep their existing single- or two-request behaviour.
+// Partial updates must not use a PUT replacement. A 404/405 on the collection
+// PATCH can still use the documented Companies/{companyID}/Contacts PATCH.
 
 import { AutotaskService } from '../src/services/autotask.service';
 import { Logger } from '../src/utils/logger';
@@ -83,7 +76,7 @@ afterEach(() => {
 });
 
 describe('AutotaskService.updateContact() child-route fallback (PR #197)', () => {
-  test('falls back to PATCH /Companies/{companyID}/Contacts when PATCH returns 404 and PUT returns 405, resolving companyID via getContact', async () => {
+  test('falls back to child PATCH on 404, resolving companyID via getContact without PUT', async () => {
     const fetchMock = mockFetchRoutes([
       { method: 'PATCH', path: /v1\.0\/Contacts$/, response: HTML_404 },
       { method: 'PUT', path: /\/Contacts\/12345$/, response: { status: 405, body: { errors: ["does not support http method 'PUT'"] } } },
@@ -94,15 +87,13 @@ describe('AutotaskService.updateContact() child-route fallback (PR #197)', () =>
     const service = new AutotaskService(config, logger);
     await expect(service.updateContact(12345, { firstName: 'Jane' })).resolves.toBeUndefined();
 
-    // The fallback is strictly last: both standard legs are attempted first,
-    // then the parent lookup, then the child-route PATCH.
+    // Only PATCH, parent lookup, and child PATCH are allowed for a partial update.
     expect(calledRoutes(fetchMock)).toEqual([
       'PATCH /ATServicesRest/v1.0/Contacts',
-      'PUT /ATServicesRest/v1.0/Contacts/12345',
       'GET /ATServicesRest/v1.0/Contacts/12345',
       'PATCH /ATServicesRest/v1.0/Companies/777/Contacts',
     ]);
-    const childBody = JSON.parse(fetchMock.mock.calls[3][1].body as string);
+    const childBody = JSON.parse(fetchMock.mock.calls[2][1].body as string);
     expect(childBody).toMatchObject({ id: 12345, firstName: 'Jane' });
   });
 
@@ -120,7 +111,6 @@ describe('AutotaskService.updateContact() child-route fallback (PR #197)', () =>
 
     expect(calledRoutes(fetchMock)).toEqual([
       'PATCH /ATServicesRest/v1.0/Contacts',
-      'PUT /ATServicesRest/v1.0/Contacts/12345',
       'PATCH /ATServicesRest/v1.0/Companies/777/Contacts',
     ]);
   });
@@ -151,18 +141,19 @@ describe('AutotaskService.updateContact() child-route fallback (PR #197)', () =>
     expect(calledRoutes(fetchMock)).toEqual(['PATCH /ATServicesRest/v1.0/Contacts']);
   });
 
-  test('Zone DE1 keeps the #133 PUT fallback — no child route when PUT succeeds', async () => {
+  test('Zone DE1 uses child PATCH even when a PUT route would succeed', async () => {
     const fetchMock = mockFetchRoutes([
       { method: 'PATCH', path: /v1\.0\/Contacts$/, response: HTML_404 },
       { method: 'PUT', path: /\/Contacts\/12345$/, response: { status: 200 } },
+      { method: 'PATCH', path: /\/Companies\/777\/Contacts$/, response: { status: 200 } },
     ]);
 
     const service = new AutotaskService(config, logger);
-    await expect(service.updateContact(12345, { firstName: 'Jane' })).resolves.toBeUndefined();
+    await expect(service.updateContact(12345, { companyID: 777, firstName: 'Jane' })).resolves.toBeUndefined();
 
     expect(calledRoutes(fetchMock)).toEqual([
       'PATCH /ATServicesRest/v1.0/Contacts',
-      'PUT /ATServicesRest/v1.0/Contacts/12345',
+      'PATCH /ATServicesRest/v1.0/Companies/777/Contacts',
     ]);
   });
 
