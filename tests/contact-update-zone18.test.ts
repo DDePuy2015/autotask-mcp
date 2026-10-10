@@ -50,7 +50,7 @@ describe('Bug 1: AutotaskHttpClient.update() PUT fallback for Zone 18 (issue #13
     });
 
     try {
-      await expect(client.update('Contacts', 12345, { firstName: 'Jane' })).resolves.toBeUndefined();
+      await expect(client.update('Contacts', 12345, { firstName: 'Jane' }, { putFallback: true })).resolves.toBeUndefined();
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       const patchUrl = fetchMock.mock.calls[0][0] as string;

@@ -475,18 +475,23 @@ export class AutotaskHttpClient {
    * Zone DE1 (Zone 18) is an exception: its IIS instance does not register the
    * collection-level PATCH route at all and returns an HTML 404 (issue #133).
    * When that happens we fall back to `PUT /{Entity}/{id}`, which Autotask
-   * supports universally across zones. The fallback is gated strictly on a 404
-   * status so genuine validation errors (400/422) still surface to the caller.
+   * can support in some zones. PUT replaces omitted writable fields, so it
+   * requires explicit opt-in from a caller with a complete replacement body.
+   * Partial updates fail on 404 rather than silently clearing other fields.
+   * The explicit target id always wins over an id inside the body.
    */
-  async update(entity: string, id: number, body: Record<string, any>): Promise<void> {
+  async update(
+    entity: string, id: number, body: Record<string, any>,
+    { putFallback = false }: { putFallback?: boolean } = {}
+  ): Promise<void> {
     try {
-      await this.request<void>('PATCH', `/${entity}`, { id, ...body });
+      await this.request<void>('PATCH', `/${entity}`, { ...body, id });
     } catch (err) {
-      if ((err as { status?: number })?.status === 404) {
+      if (putFallback && (err as { status?: number })?.status === 404) {
         this.logger.debug(
           `Autotask PATCH /${entity} returned 404 (likely Zone DE1) — retrying as PUT /${entity}/${id}`
         );
-        await this.request<void>('PUT', `/${entity}/${id}`, body);
+        await this.request<void>('PUT', `/${entity}/${id}`, { ...body, id });
         return;
       }
       throw err;
@@ -627,7 +632,7 @@ export class AutotaskHttpClient {
     await this.request<void>(
       'PATCH',
       `/${parentEntity}/${parentId}/${childEntity}`,
-      { id, ...body }
+      { ...body, id }
     );
   }
 
