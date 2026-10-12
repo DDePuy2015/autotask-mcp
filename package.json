@@ -42,15 +42,15 @@
   "author": "Aaron Sachs",
   "license": "Apache-2.0",
   "dependencies": {
-    "@modelcontextprotocol/node": "^2.0.0-beta.5",
-    "@modelcontextprotocol/server": "^2.0.0-beta.5",
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.1",
     "winston": "^3.11.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
     "@eslint/js": "^10.0.1",
-    "@modelcontextprotocol/client": "^2.0.0-beta.5",
+    "@modelcontextprotocol/client": "^2.3.1",
     "@modelcontextprotocol/ext-apps": "^1.7.3",
     "@semantic-release/changelog": "^7.0.0",
     "@semantic-release/git": "^11.0.1",
