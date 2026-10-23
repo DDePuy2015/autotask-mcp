@@ -57,6 +57,51 @@ test('partial ticket updates never turn a PATCH 404 into PUT', async () => {
   expect(sent(spy)).toEqual([{ url: `${base}/Tickets`, method: 'PATCH', body: { id: 7, title: 'changed' } }]);
 });
 
+test.each([
+  ['updateCompany', 'Companies'],
+  ['updateProject', 'Projects'],
+  ['updateContract', 'Contracts'],
+] as const)('%s preserves the requested target and refuses replacement after 404', async (method, entity) => {
+  const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('missing route', { status: 404 }));
+  const updates = { id: 99 };
+  await expect(new AutotaskService(config, logger)[method](7, updates)).rejects.toThrow('HTTP 404');
+  expect(sent(spy)).toEqual([{ url: `${base}/${entity}`, method: 'PATCH', body: { id: 7 } }]);
+  expect(updates.id).toBe(99);
+});
+
+test('task updates keep the child target through the service layer', async () => {
+  const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(''));
+  const updates = { id: 99, projectID: 42, title: 'changed' };
+  await new AutotaskService(config, logger).updateTask(7, updates);
+  expect(sent(spy)).toEqual([{ url: `${base}/Projects/42/Tasks`, method: 'PATCH', body: {
+    id: 7, projectID: 42, title: 'changed',
+  } }]);
+  expect(updates.id).toBe(99);
+});
+
+test('checklist updates preserve both explicit ticket and item targets', async () => {
+  const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(''));
+  const updates = { id: 99, ticketID: 88, isCompleted: true };
+  await new AutotaskService(config, logger).updateTicketChecklistItem(42, 7, updates);
+  expect(sent(spy)).toEqual([{ url: `${base}/Tickets/42/ChecklistItems`, method: 'PATCH', body: {
+    id: 7, ticketID: 42, isCompleted: true,
+  } }]);
+  expect(updates).toEqual({ id: 99, ticketID: 88, isCompleted: true });
+});
+
+test.each([404, 405])('contact fallback after %i preserves its explicit target without PUT', async status => {
+  const spy = jest.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(new Response('missing route', { status }))
+    .mockResolvedValueOnce(new Response(''));
+  const updates = { id: 99, companyID: 42, firstName: 'Jane' };
+  await new AutotaskService(config, logger).updateContact(7, updates);
+  expect(sent(spy)).toEqual([
+    { url: `${base}/Contacts`, method: 'PATCH', body: { id: 7, companyID: 42, firstName: 'Jane' } },
+    { url: `${base}/Companies/42/Contacts`, method: 'PATCH', body: { id: 7, companyID: 42, firstName: 'Jane' } },
+  ]);
+  expect(updates.id).toBe(99);
+});
+
 test('explicit replacement opt-in allows PUT only after a numeric 404 and preserves the target', async () => {
   const spy = jest.spyOn(globalThis, 'fetch')
     .mockResolvedValueOnce(new Response('missing route', { status: 404 }))
