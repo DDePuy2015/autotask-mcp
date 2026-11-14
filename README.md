@@ -337,6 +337,7 @@ Resources provide read-only access to Autotask data:
 The server provides 101 tools for interacting with Autotask:
 
 #### Company Operations
+- `autotask_get_company` - Read company identity, classification/type IDs and best-effort labels; [narrow response and availability](docs/company-classification-read.md).
 - `autotask_search_companies` - Search companies with filters
 - `autotask_create_company` - Create new company
 - `autotask_update_company` - Update existing company
