@@ -368,8 +368,7 @@ export class AutotaskHttpClient {
       // Autotask returns { item: {...} } but some legacy routes return the entity at top level.
       return (options.unwrapItem === false ? res : ((res as any)?.item ?? (res as any))) || null;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('HTTP 404')) return null;
+      if ((err as { status?: number })?.status === 404) return null;
       throw err;
     }
   }
@@ -541,8 +540,7 @@ export class AutotaskHttpClient {
       );
       return (options.unwrapItem === false ? res : ((res as any)?.item ?? (res as any))) || null;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('HTTP 404')) return null;
+      if ((err as { status?: number })?.status === 404) return null;
       throw err;
     }
   }
@@ -578,8 +576,7 @@ export class AutotaskHttpClient {
       );
       return res?.items || [];
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('HTTP 404')) {
+      if ((err as { status?: number })?.status === 404) {
         // Fallback: GET /{Parent}/{id}/{Child} returns { items: [...] }
         const res = await this.request<QueryResponse<T>>(
           'GET',

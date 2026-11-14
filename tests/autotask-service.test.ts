@@ -1,12 +1,6 @@
 // Autotask Service Tests
 // Tests for the AutotaskService wrapper
 
-jest.mock('autotask-node', () => ({
-  AutotaskClient: {
-    create: jest.fn().mockRejectedValue(new Error('Mock: Cannot connect to Autotask API'))
-  }
-}));
-
 import { AutotaskService, MATCH_ALL } from '../src/services/autotask.service';
 import { Logger } from '../src/utils/logger';
 import type { McpServerConfig } from '../src/types/mcp';
@@ -17,7 +11,8 @@ const mockConfig: McpServerConfig = {
   autotask: {
     username: 'test-username',
     secret: 'test-secret', 
-    integrationCode: 'test-integration-code'
+    integrationCode: 'test-integration-code',
+    apiUrl: 'https://service-tests.invalid/ATServicesRest/'
   }
 };
 
@@ -39,6 +34,10 @@ function jsonResponse(body: any, status: number = 200): Response {
 }
 
 describe('AutotaskService', () => {
+  beforeEach(() => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Synthetic HTTP transport failure'));
+  });
+  afterEach(() => jest.restoreAllMocks());
   test('should be instantiable', () => {
     const service = new AutotaskService(mockConfig, mockLogger);
     expect(service).toBeInstanceOf(AutotaskService);
@@ -46,7 +45,7 @@ describe('AutotaskService', () => {
   });
 
   test('should validate required configuration', async () => {
-    const invalidConfig = { ...mockConfig };
+    const invalidConfig = structuredClone(mockConfig);
     delete invalidConfig.autotask.username;
     
     const service = new AutotaskService(invalidConfig, mockLogger);
@@ -115,12 +114,12 @@ describe('AutotaskService', () => {
   describe('Company Site Configurations', () => {
     test('getCompanySiteConfigurations should propagate errors when client cannot connect', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
-      await expect(service.getCompanySiteConfigurations(123)).rejects.toThrow();
+      await expect(service.getCompanySiteConfigurations(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('updateCompanySiteConfiguration should propagate errors when client cannot connect', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
-      await expect(service.updateCompanySiteConfiguration(456, { someField: 'value' })).rejects.toThrow();
+      await expect(service.updateCompanySiteConfiguration(456, { someField: 'value' })).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
   });
 
@@ -130,19 +129,19 @@ describe('AutotaskService', () => {
       const service = new AutotaskService(mockConfig, mockLogger);
       
       // Test ticket notes
-      await expect(service.getTicketNote(123, 456)).rejects.toThrow();
-      await expect(service.searchTicketNotes(123)).rejects.toThrow();
-      await expect(service.createTicketNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow();
+      await expect(service.getTicketNote(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchTicketNotes(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createTicketNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow(/Synthetic HTTP transport failure/);
       
       // Test project notes
-      await expect(service.getProjectNote(123, 456)).rejects.toThrow();
-      await expect(service.searchProjectNotes(123)).rejects.toThrow();
-      await expect(service.createProjectNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow();
+      await expect(service.getProjectNote(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchProjectNotes(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createProjectNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow(/Synthetic HTTP transport failure/);
       
       // Test company notes
-      await expect(service.getCompanyNote(123, 456)).rejects.toThrow();
-      await expect(service.searchCompanyNotes(123)).rejects.toThrow();
-      await expect(service.createCompanyNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow();
+      await expect(service.getCompanyNote(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchCompanyNotes(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createCompanyNote(123, { title: 'Test', description: 'Test note' })).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should expose ticket checklist item CRUD methods', async () => {
@@ -153,11 +152,11 @@ describe('AutotaskService', () => {
       expect(typeof service.updateTicketChecklistItem).toBe('function');
       expect(typeof service.deleteTicketChecklistItem).toBe('function');
 
-      // With the mocked client failing to initialize, every call should reject.
-      await expect(service.searchTicketChecklistItems(123)).rejects.toThrow();
-      await expect(service.createTicketChecklistItem(123, { itemName: 'Step 1' })).rejects.toThrow();
-      await expect(service.updateTicketChecklistItem(123, 456, { isCompleted: true })).rejects.toThrow();
-      await expect(service.deleteTicketChecklistItem(123, 456)).rejects.toThrow();
+      // With the native HTTP transport failing, every call should reject.
+      await expect(service.searchTicketChecklistItems(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createTicketChecklistItem(123, { itemName: 'Step 1' })).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.updateTicketChecklistItem(123, 456, { isCompleted: true })).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.deleteTicketChecklistItem(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should expose ticket history methods and require ticketId for search', async () => {
@@ -170,23 +169,23 @@ describe('AutotaskService', () => {
       // a generic 400 from Autotask when the caller forgets ticketId.
       await expect(service.searchTicketHistory({})).rejects.toThrow(/ticketId is required/);
 
-      // With the mocked client failing to initialize, real calls should reject.
-      await expect(service.getTicketHistory(456)).rejects.toThrow();
-      await expect(service.searchTicketHistory({ ticketId: 123 })).rejects.toThrow();
+      // With the native HTTP transport failing, real calls should reject.
+      await expect(service.getTicketHistory(456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchTicketHistory({ ticketId: 123 })).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle attachment methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getTicketAttachment(123, 456)).rejects.toThrow();
-      await expect(service.searchTicketAttachments(123)).rejects.toThrow();
+      await expect(service.getTicketAttachment(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchTicketAttachments(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle ticket note attachment methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getTicketNoteAttachment(123, 456)).rejects.toThrow();
-      await expect(service.searchTicketNoteAttachments(123)).rejects.toThrow();
+      await expect(service.getTicketNoteAttachment(123, 456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchTicketNoteAttachments(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     describe('getTicketAttachment endpoint routing', () => {
@@ -515,60 +514,60 @@ describe('AutotaskService', () => {
     test('should handle expense methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
       
-      await expect(service.getExpenseReport(123)).rejects.toThrow();
-      await expect(service.searchExpenseReports()).rejects.toThrow();
-      await expect(service.createExpenseReport({ name: 'Test Report', submitterID: 123 })).rejects.toThrow();
+      await expect(service.getExpenseReport(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchExpenseReports()).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createExpenseReport({ name: 'Test Report', submitterID: 123 })).rejects.toThrow(/Synthetic HTTP transport failure/);
       
       // Expense items
-      await expect(service.getExpenseItem(456)).rejects.toThrow();
-      await expect(service.searchExpenseItems()).rejects.toThrow();
-      await expect(service.createExpenseItem({ description: 'Test', expenseDate: '2024-01-01', expenseCurrencyExpenseAmount: 100 })).rejects.toThrow();
+      await expect(service.getExpenseItem(456)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchExpenseItems()).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createExpenseItem({ description: 'Test', expenseDate: '2024-01-01', expenseCurrencyExpenseAmount: 100 })).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle quote methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
       
-      await expect(service.getQuote(123)).rejects.toThrow();
-      await expect(service.searchQuotes()).rejects.toThrow();
-      await expect(service.createQuote({ name: 'Test Quote', companyID: 123 })).rejects.toThrow();
+      await expect(service.getQuote(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchQuotes()).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createQuote({ name: 'Test Quote', companyID: 123 })).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle opportunity methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getOpportunity(123)).rejects.toThrow();
-      await expect(service.searchOpportunities()).rejects.toThrow();
+      await expect(service.getOpportunity(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchOpportunities()).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle product methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getProduct(123)).rejects.toThrow();
-      await expect(service.searchProducts()).rejects.toThrow();
+      await expect(service.getProduct(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchProducts()).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle service methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getService(123)).rejects.toThrow();
-      await expect(service.searchServices()).rejects.toThrow();
+      await expect(service.getService(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchServices()).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle service bundle methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getServiceBundle(123)).rejects.toThrow();
-      await expect(service.searchServiceBundles()).rejects.toThrow();
+      await expect(service.getServiceBundle(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchServiceBundles()).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle quote item methods with proper error messages', async () => {
       const service = new AutotaskService(mockConfig, mockLogger);
 
-      await expect(service.getQuoteItem(123)).rejects.toThrow();
-      await expect(service.searchQuoteItems()).rejects.toThrow();
-      await expect(service.createQuoteItem({ quoteID: 1, quantity: 5 })).rejects.toThrow();
-      await expect(service.updateQuoteItem(123, { quantity: 10 })).rejects.toThrow();
-      await expect(service.deleteQuoteItem(1, 123)).rejects.toThrow();
+      await expect(service.getQuoteItem(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchQuoteItems()).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.createQuoteItem({ quoteID: 1, quantity: 5 })).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.updateQuoteItem(123, { quantity: 10 })).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.deleteQuoteItem(1, 123)).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle billing code methods (now implemented, require credentials)', async () => {
@@ -576,8 +575,8 @@ describe('AutotaskService', () => {
 
       // Billing codes are now implemented via client.financial.billingCodes
       // Without credentials they throw a credentials error
-      await expect(service.getBillingCode(123)).rejects.toThrow();
-      await expect(service.searchBillingCodes()).rejects.toThrow();
+      await expect(service.getBillingCode(123)).rejects.toThrow(/Synthetic HTTP transport failure/);
+      await expect(service.searchBillingCodes()).rejects.toThrow(/Synthetic HTTP transport failure/);
     });
 
     test('should handle unsupported entity methods with proper error messages', async () => {

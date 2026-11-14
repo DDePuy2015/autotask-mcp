@@ -3,12 +3,6 @@
 // friends) that do not exist, so every ticket- or task-scoped entry 404'd.
 // TimeEntries is a top-level entity; the parent travels in the payload.
 
-jest.mock('autotask-node', () => ({
-  AutotaskClient: {
-    create: jest.fn().mockRejectedValue(new Error('Mock: Cannot connect to Autotask API'))
-  }
-}));
-
 import { TOOL_DEFINITIONS } from '../src/handlers/tool.definitions';
 import { AutotaskToolHandler } from '../src/handlers/tool.handler';
 import { AutotaskService } from '../src/services/autotask.service';
