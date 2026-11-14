@@ -111,7 +111,9 @@ describe('attachment service and MCP tool ownership', () => {
     expect(result.content[0].text).not.toContain(PNG);
     expect(JSON.parse(result.content[0].text).data).not.toHaveProperty('data');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(String(fetchSpy.mock.calls[0]![0])).toMatch(/\/Ticket(?:Note)?Attachments\/456$/);
+    expect(String(fetchSpy.mock.calls[0]![0])).toBe(name === 'autotask_get_ticket_attachment'
+      ? 'https://images.invalid/atservicesrest/v1.0/TicketAttachments/456'
+      : 'https://images.invalid/atservicesrest/v1.0/TicketNotes/789/Attachments/456');
   });
   test('live-shaped one-row JPEG response becomes a native image', async () => {
     fetchSpy.mockResolvedValue(new Response(JSON.stringify(childDetail({ ...attachment, parentID: 123, ticketNoteID: null, fullPath: 'fixture.jpg', contentType: 'image/jpeg', data: JPEG }))));

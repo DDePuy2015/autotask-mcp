@@ -319,7 +319,7 @@ describe('AutotaskService', () => {
         expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketNotes/123/Attachments/456');
       });
 
-      test('includeData=true unwraps the note top-level detail endpoint and returns data', async () => {
+      test('includeData=true unwraps the verified note child endpoint and returns data', async () => {
         const smallBase64 = Buffer.from('hello').toString('base64');
         const fetchSpy = jest
           .spyOn(globalThis, 'fetch')
@@ -330,7 +330,7 @@ describe('AutotaskService', () => {
         expect(r?.data).toBe(smallBase64);
         expect(r?.dataOmittedReason).toBeUndefined();
         const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
-        expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketNoteAttachments/456');
+        expect(url).toBe('https://example.autotask.net/atservicesrest/v1.0/TicketNotes/123/Attachments/456');
       });
 
       test('includeData=true strips oversized data and surfaces dataOmittedReason', async () => {

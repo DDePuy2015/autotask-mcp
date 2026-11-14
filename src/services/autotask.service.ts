@@ -2116,7 +2116,8 @@ export class AutotaskService {
   /**
    * Get an attachment on a ticket note. With `includeData` false (default),
    * hits `TicketNotes/{id}/Attachments/{id}` and returns metadata only.
-   * With `includeData` true, the top-level entity supplies `data`. Both
+   * With `includeData` true, prefer verified child bytes and try the top-level
+   * entity only for missing bytes or independent ownership verification. Both
    * paths verify that the attachment actually belongs to
    * `ticketNoteId` — `ticketNoteID` is an optional field on this entity
    * (Autotask's own field metadata marks it `isRequired: false`, since a
@@ -2149,10 +2150,8 @@ export class AutotaskService {
         `Getting ticket note attachment - TicketNoteID: ${ticketNoteId}, AttachmentID: ${attachmentId}, includeData: ${includeData}`
       );
 
-      const response = includeData
-        ? await http.get<unknown>('TicketNoteAttachments', attachmentId, { unwrapItem: false })
-        : await http.childGet<unknown>('TicketNotes', ticketNoteId, 'Attachments', attachmentId, { unwrapItem: false });
-      const attachment = AutotaskService.attachmentRow<AutotaskTicketNoteAttachment>(response);
+      const response = await http.childGet<unknown>('TicketNotes', ticketNoteId, 'Attachments', attachmentId, { unwrapItem: false });
+      let attachment = AutotaskService.attachmentRow<AutotaskTicketNoteAttachment>(response);
       if (!attachment) return null;
 
       // An attachment ID alone does not prove scope, so enforce the returned
@@ -2164,10 +2163,18 @@ export class AutotaskService {
       // AND mismatched values in one check — the earlier `typeof === 'number'
       // && !==` form let an attachment with no ticketNoteID through
       // unverified (CodeRabbit PR #300 review).
-      const parentId = attachment.parentAttachmentID ?? ticketNoteId;
-      if (attachment.ticketNoteID !== ticketNoteId || attachment.id !== attachmentId ||
-          (options.ticketId !== undefined && attachment.ticketID !== options.ticketId) ||
-          (attachment.parentID != null && attachment.parentID !== parentId)) {
+      const owned = (row: AutotaskTicketNoteAttachment) =>
+        row.ticketNoteID === ticketNoteId && row.id === attachmentId &&
+        (options.ticketId === undefined || row.ticketID === options.ticketId) &&
+        (row.parentID == null || row.parentID === (row.parentAttachmentID ?? ticketNoteId));
+      const hasBytes = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+      // A parent-scoped URL alone never proves ownership. Explicit conflicts
+      // cannot be repaired by a second endpoint; absent fields need independent
+      // proof from an exact, fully owned top-level record before returning bytes.
+      if (attachment.id !== attachmentId ||
+          (attachment.ticketNoteID != null && attachment.ticketNoteID !== ticketNoteId) ||
+          (options.ticketId !== undefined && attachment.ticketID != null && attachment.ticketID !== options.ticketId) ||
+          (attachment.parentID != null && attachment.parentID !== (attachment.parentAttachmentID ?? ticketNoteId))) {
         this.logger.warn(
           `Ticket note attachment ${attachmentId} could not be verified for note ${ticketNoteId}. Returning null.`
         );
@@ -2175,8 +2182,24 @@ export class AutotaskService {
       }
 
       if (!includeData) {
+        if (!owned(attachment)) return null;
         const { data: _data, ...metadata } = attachment;
         return metadata;
+      }
+
+      if (!owned(attachment) || !hasBytes(attachment.data)) {
+        const topResponse = await http.get<unknown>('TicketNoteAttachments', attachmentId, { unwrapItem: false });
+        const top = AutotaskService.attachmentRow<AutotaskTicketNoteAttachment>(topResponse);
+        if (!top || !owned(top)) {
+          if (!owned(attachment)) return null;
+          throw new Error('Note attachment was found, but no independently verified file bytes were available from TicketNoteAttachments.');
+        }
+        const data = hasBytes(attachment.data) ? attachment.data : top.data;
+        if (!hasBytes(data)) {
+          throw new Error('Note attachment was found, but both endpoints omitted file bytes. URL or file-link attachments may have no uploaded binary.');
+        }
+        attachment = { ...top, ...attachment, ticketNoteID: ticketNoteId,
+          ...(options.ticketId !== undefined && { ticketID: options.ticketId }), data };
       }
 
       // Oversized binaries arrive truncated/garbled at the MCP client. Strip
