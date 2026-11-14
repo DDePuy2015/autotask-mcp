@@ -113,7 +113,10 @@ test('schemas, handlers and category membership stay in parity with explicit met
   expect(new Set(names).size).toBe(names.length);
   const dispatch: Map<string, unknown> = (handler() as any).getDispatchTable();
   expect(new Set([...dispatch.keys(), 'autotask_execute_tool'])).toEqual(new Set(names));
-  const excluded = new Set(['autotask_list_categories', 'autotask_list_category_tools', 'autotask_execute_tool', 'autotask_router', 'autotask_raw_request']);
+  // Preserve existing dispatch without newly advertising these writes.
+  const excluded = new Set(['autotask_list_categories', 'autotask_list_category_tools', 'autotask_execute_tool', 'autotask_router', 'autotask_raw_request',
+    'autotask_update_contact', 'autotask_update_project', 'autotask_create_ticket_checklist_item',
+    'autotask_update_ticket_checklist_item', 'autotask_delete_ticket_checklist_item']);
   const categorized = Object.values(TOOL_CATEGORIES).flatMap(category => category.tools);
   expect(new Set(categorized).size).toBe(categorized.length);
   expect(new Set(categorized)).toEqual(new Set(names.filter(name => !excluded.has(name))));
@@ -122,11 +125,21 @@ test('schemas, handlers and category membership stay in parity with explicit met
 });
 
 test.each([
-  ['contacts', 'autotask_update_contact'], ['projects', 'autotask_update_project'],
-  ['tickets', 'autotask_search_ticket_checklist_items'], ['tickets', 'autotask_create_ticket_checklist_item'],
-  ['tickets', 'autotask_update_ticket_checklist_item'], ['tickets', 'autotask_delete_ticket_checklist_item'],
+  ['tickets', 'autotask_search_ticket_checklist_items'],
   ['financial', 'autotask_get_invoice_details'],
-])('%s category discovers existing business tool %s', async (category, tool) => {
+])('%s category discovers existing read tool %s', async (category, tool) => {
   const result = await handler().callTool('autotask_list_category_tools', { category });
   expect(JSON.parse(result.content[0].text).data.map((item: { name: string }) => item.name)).toContain(tool);
+});
+
+test.each([
+  ['contacts', 'autotask_update_contact'], ['projects', 'autotask_update_project'],
+  ['tickets', 'autotask_create_ticket_checklist_item'], ['tickets', 'autotask_update_ticket_checklist_item'],
+  ['tickets', 'autotask_delete_ticket_checklist_item'],
+])('%s discovery does not newly advertise existing write %s', async (category, tool) => {
+  const source = handler();
+  const result = await source.callTool('autotask_list_category_tools', { category });
+  expect(JSON.parse(result.content[0].text).data.map((item: { name: string }) => item.name)).not.toContain(tool);
+  expect(TOOL_DEFINITIONS.some(definition => definition.name === tool)).toBe(true);
+  expect((source as any).getDispatchTable().has(tool)).toBe(true);
 });
