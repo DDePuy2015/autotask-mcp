@@ -4,7 +4,7 @@
  * per entity type and providing pagination metadata.
  */
 
-export type EntityType = 'tickets' | 'companies' | 'contacts' | 'projects' | 'tasks' | 'resources' | 'billingItems' | 'billingItemApprovalLevels' | 'timeEntries';
+export type EntityType = 'tickets' | 'companies' | 'contacts' | 'projects' | 'tasks' | 'resources' | 'billingItems' | 'billingItemApprovalLevels' | 'timeEntries' | 'ticketCharges';
 
 export interface CompactResponse {
   summary: {
@@ -23,6 +23,7 @@ export interface CompactResponse {
  */
 const SUMMARY_FIELDS: Record<EntityType, string[]> = {
   tickets: ['id', 'ticketNumber', 'title', 'status', 'priority', 'companyID', 'assignedResourceID', 'assignedResourceRoleID', 'createDate', 'dueDateTime'],
+  ticketCharges: ['id', 'ticketID', 'name', 'description', 'chargeType', 'unitQuantity', 'unitPrice', 'unitCost', 'billableToAccount', 'datePurchased', 'productID', 'billingCodeID', 'status'],
   companies: ['id', 'companyName', 'isActive', 'phone', 'city', 'state'],
   contacts: ['id', 'firstName', 'lastName', 'emailAddress', 'companyID'],
   projects: ['id', 'projectName', 'status', 'companyID', 'projectLeadResourceID', 'startDate', 'endDate'],
@@ -93,34 +94,27 @@ export function formatCompactResponse(
 }
 
 /**
- * Detect entity type from tool name.
+ * Exact supported search names: the autotask prefix itself contains "task",
+ * and ticket charges must not inherit ticket summary fields.
+ * Keep detection and compact eligibility on the same explicit mapping.
  */
+const COMPACT_SEARCH_ENTITY_TYPES = new Map<string, EntityType>([
+  ['autotask_search_tickets', 'tickets'],
+  ['autotask_search_companies', 'companies'],
+  ['autotask_search_contacts', 'contacts'],
+  ['autotask_search_projects', 'projects'],
+  ['autotask_search_tasks', 'tasks'],
+  ['autotask_search_resources', 'resources'],
+  ['autotask_search_billing_items', 'billingItems'],
+  ['autotask_search_billing_item_approval_levels', 'billingItemApprovalLevels'],
+  ['autotask_search_time_entries', 'timeEntries'],
+  ['autotask_search_ticket_charges', 'ticketCharges'],
+]);
+
+/** Detect the entity type of a supported compact search tool. */
 export function detectEntityType(toolName: string): EntityType | null {
-  // Order matters - check more specific patterns first
-  if (toolName.includes('billing_item_approval')) return 'billingItemApprovalLevels';
-  if (toolName.includes('billing_item')) return 'billingItems';
-  if (toolName.includes('time_entr')) return 'timeEntries';
-  if (toolName.includes('ticket')) return 'tickets';
-  if (toolName.includes('compan')) return 'companies';
-  if (toolName.includes('contact')) return 'contacts';
-  if (toolName.includes('project')) return 'projects';
-  if (toolName.includes('task')) return 'tasks';
-  if (toolName.includes('resource')) return 'resources';
-  return null;
+  return COMPACT_SEARCH_ENTITY_TYPES.get(toolName) ?? null;
 }
 
-/**
- * List of search tool names that should use compact formatting.
- */
-export const COMPACT_SEARCH_TOOLS = new Set([
-  'autotask_search_tickets',
-  'autotask_search_companies',
-  'autotask_search_contacts',
-  'autotask_search_projects',
-  'autotask_search_tasks',
-  'autotask_search_resources',
-  'autotask_search_billing_items',
-  'autotask_search_billing_item_approval_levels',
-  'autotask_search_time_entries',
-  'autotask_search_ticket_charges',
-]);
+/** List of search tool names that should use compact formatting. */
+export const COMPACT_SEARCH_TOOLS = new Set(COMPACT_SEARCH_ENTITY_TYPES.keys());
