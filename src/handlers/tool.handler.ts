@@ -1,3 +1,4 @@
+import { readCompanySummary } from './company-reader.js';
 import { Server } from "@modelcontextprotocol/server";
 
 // Autotask Tool Handler
@@ -872,7 +873,7 @@ export class AutotaskToolHandler {
   /**
    * Dispatch table: maps tool names to handler functions
    */
-  private getDispatchTable(): Map<string, (args: any) => Promise<{ result: any; message: string; image?: NativeImageContent }>> {
+  private getDispatchTable(): Map<string, (args: any) => Promise<{ result: any; message: string; image?: NativeImageContent; skipEnhancement?: boolean }>> {
     const s = this.autotaskService;
     type H = (args: any) => Promise<{ result: any; message: string }>;
     return new Map<string, H>([
@@ -886,6 +887,12 @@ export class AutotaskToolHandler {
       }],
 
       // Companies
+      ['autotask_get_company', async (a) => {
+        // Normalize here too: main's nested executor bypasses callTool normalization.
+        const id = normalizeCompanyIdAlias(a).companyID;
+        const result = await readCompanySummary(s, this.logger, id);
+        return { result, message: `Company ${id} retrieved successfully`, skipEnhancement: true };
+      }],
       ['autotask_search_companies', async (a) => {
         const r = await s.searchCompanies(a); return { result: r, message: `Found ${r.length} companies` };
       }],
@@ -1696,7 +1703,7 @@ export class AutotaskToolHandler {
       const handler = this.getDispatchTable().get(name);
       if (!handler) throw new Error(`Unknown tool: ${name}`);
 
-      const { result, message, image } = await handler(args);
+      const { result, message, image, skipEnhancement } = await handler(args);
 
       // Check for empty/not-found results and return explicit error to prevent hallucination
       const notFoundMsg = this.buildNotFoundMessage(name, args, result);
@@ -1707,7 +1714,10 @@ export class AutotaskToolHandler {
 
       // Format and enhance response
       let responseText: string;
-      if (COMPACT_SEARCH_TOOLS.has(name) && Array.isArray(result)) {
+      if (skipEnhancement) {
+        // Already projected company data needs no unrelated name/cache warm-up.
+        responseText = JSON.stringify({ message, data: result });
+      } else if (COMPACT_SEARCH_TOOLS.has(name) && Array.isArray(result)) {
         const entityType = detectEntityType(name);
         if (entityType) {
           const compact = formatCompactResponse(result, entityType, {

@@ -57,6 +57,18 @@ export const TOOL_DEFINITIONS: McpTool[] = [
 
   // Company tools
   {
+    name: 'autotask_get_company',
+    description: 'Read one company: id, companyName, isActive, classification and companyType IDs only. Best-effort labels may be omitted. No addresses, notes or user-defined fields. Summit proxy availability requires separate policy approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        companyID: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: 'Company ID; 0 is valid. Legacy companyId/CompanyID accepted. Canonical companyID takes precedence.' }
+      },
+      required: ['companyID']
+    },
+    annotations: { readOnlyHint: true }
+  },
+  {
     name: 'autotask_search_companies',
     description: 'Search companies by name or status. Max 200/page.',
     inputSchema: {
@@ -3340,7 +3352,7 @@ export const TOOL_CATEGORIES: Record<string, { description: string; tools: strin
   },
   companies: {
     description: 'Search, create, and update companies',
-    tools: ['autotask_search_companies', 'autotask_create_company', 'autotask_update_company', 'autotask_get_company_site_configuration', 'autotask_update_company_site_configuration']
+    tools: ['autotask_search_companies', 'autotask_get_company', 'autotask_create_company', 'autotask_update_company', 'autotask_get_company_site_configuration', 'autotask_update_company_site_configuration']
   },
   contacts: {
     description: 'Search and create contacts',
