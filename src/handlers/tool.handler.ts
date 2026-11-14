@@ -6,7 +6,7 @@ import { AutotaskService } from '../services/autotask.service.js';
 import { AutotaskRateLimitError } from '../services/autotask-http.js';
 import { PicklistCache, PicklistValue } from '../services/picklist.cache.js';
 import { Logger } from '../utils/logger.js';
-import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS } from '../utils/response.formatter.js';
+import { formatCompactResponse, detectEntityType, COMPACT_SEARCH_TOOLS, PAGED_SEARCH_TOOLS } from '../utils/response.formatter.js';
 import { MappingService } from '../utils/mapping.service.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { TOOL_DEFINITIONS, TOOL_CATEGORIES } from './tool.definitions.js';
@@ -1710,9 +1710,12 @@ export class AutotaskToolHandler {
       if (COMPACT_SEARCH_TOOLS.has(name) && Array.isArray(result)) {
         const entityType = detectEntityType(name);
         if (entityType) {
+          const paging = PAGED_SEARCH_TOOLS[name];
           const compact = formatCompactResponse(result, entityType, {
             page: args.page,
-            pageSize: args.pageSize,
+            pageSize: Math.min(args.pageSize || 25, paging?.pageSize ?? 500),
+            paginationSupported: paging !== undefined,
+            ...(paging?.maxPage !== undefined && { maxPage: paging.maxPage }),
           });
           compact.items = await this.enhanceItems(compact.items);
           responseText = JSON.stringify(compact);

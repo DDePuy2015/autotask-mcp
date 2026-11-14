@@ -6,6 +6,16 @@
 
 export type EntityType = 'tickets' | 'companies' | 'contacts' | 'projects' | 'tasks' | 'resources' | 'billingItems' | 'billingItemApprovalLevels' | 'timeEntries';
 
+/** Only these tools actually support offset-style continuation. */
+export const PAGED_SEARCH_TOOLS: Record<string, { pageSize: number; maxPage?: number }> = {
+  autotask_search_tickets: { pageSize: 500, maxPage: 50 },
+  autotask_search_contacts: { pageSize: 200, maxPage: 50 },
+  autotask_search_projects: { pageSize: 100, maxPage: 50 },
+  autotask_search_resources: { pageSize: 500, maxPage: 50 },
+  autotask_search_companies: { pageSize: 200 },
+  autotask_search_tasks: { pageSize: 100 },
+};
+
 export interface CompactResponse {
   summary: {
     returned: number;
@@ -68,17 +78,22 @@ function pickSummaryFields(item: Record<string, any>, entityType: EntityType): R
 export function formatCompactResponse(
   items: Record<string, any>[],
   entityType: EntityType,
-  options: { page?: number; pageSize?: number; totalFetched?: number }
+  options: { page?: number; pageSize?: number; totalFetched?: number; paginationSupported?: boolean; maxPage?: number }
 ): CompactResponse {
   const page = options.page || 1;
   const pageSize = options.pageSize || 25;
-  const hasMore = items.length >= pageSize;
+  const atBudget = options.maxPage !== undefined && page >= options.maxPage;
+  const hasMore = items.length >= pageSize && !atBudget;
 
   const compactItems = items.map(item => pickSummaryFields(item, entityType));
 
-  const hint = hasMore
-    ? `Use page:${page + 1} for more results, or use get_ticket_details/show commands for full data on specific items`
-    : undefined;
+  const hint = atBudget && items.length >= pageSize
+    ? 'Pagination budget reached. Narrow the query to retrieve deeper results.'
+    : hasMore
+      ? options.paginationSupported === false
+        ? 'Result limit reached. Narrow the query or increase pageSize within the tool limit.'
+        : `Use page:${page + 1} with the same filters and pageSize for more results.`
+      : undefined;
 
   return {
     summary: {

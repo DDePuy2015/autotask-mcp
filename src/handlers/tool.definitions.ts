@@ -327,9 +327,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           description: 'Filter by active status (1=active, 0=inactive)'
         },
         page: {
-          type: 'number',
-          
-          minimum: 1
+          type: 'integer',
+          description: 'Page number (default 1, max 50); narrow filters for deeper results',
+          minimum: 1,
+          maximum: 50
         },
         pageSize: {
           type: 'number',
@@ -528,9 +529,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           description: 'Filter tickets with activity on or after this date (ISO format)'
         },
         page: {
-          type: 'number',
-          
-          minimum: 1
+          type: 'integer',
+          description: 'Page number (default 1, max 50); narrow filters for deeper results',
+          minimum: 1,
+          maximum: 50
         },
         pageSize: {
           type: 'number',
@@ -1050,9 +1052,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           description: 'Filter by project lead resource ID'
         },
         page: {
-          type: 'number',
-          
-          minimum: 1
+          type: 'integer',
+          description: 'Page number (default 1, max 50); narrow filters for deeper results',
+          minimum: 1,
+          maximum: 50
         },
         pageSize: {
           type: 'number',
@@ -1197,9 +1200,10 @@ export const TOOL_DEFINITIONS: McpTool[] = [
           description: 'Filter by resource type (1=Employee, 2=Contractor, 3=Temporary)'
         },
         page: {
-          type: 'number',
-          
-          minimum: 1
+          type: 'integer',
+          description: 'Page number (default 1, max 50); narrow filters for deeper results',
+          minimum: 1,
+          maximum: 50
         },
         pageSize: {
           type: 'number',
