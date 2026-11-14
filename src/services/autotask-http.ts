@@ -432,6 +432,9 @@ export class AutotaskHttpClient {
       if (response?.items) items.push(...response.items);
     };
     let resp = await this.request<QueryResponse<T>>('POST', `/${entity}/query`, body);
+    // Record the successful initial request too. Resolve after request() so a
+    // zone-refresh retry is represented by the current, successful zone.
+    if (bounded) visited.add(new URL(`${await this.baseUrl()}/${entity}/query`).href);
     appendPage(resp);
 
     while (

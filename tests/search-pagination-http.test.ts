@@ -123,3 +123,23 @@ test('compact metadata uses the effective clamped page size', async () => {
   const result = await new AutotaskToolHandler(service, logger, true).callTool('autotask_search_contacts', { pageSize: 999 });
   expect(JSON.parse(result.content[0].text).summary).toMatchObject({ pageSize: 200, hasMore: true });
 });
+
+// The initial query is already visited, including equivalent absolute URLs.
+test.each([
+  '/Tickets/query',
+  base + '/Tickets/query',
+  'https://pagination.invalid:443/ATServicesRest/v1.0/Tickets/query',
+  '/Tickets/query/../query',
+])('self-referencing initial cursor %s fails before a duplicate request', async cursor => {
+  const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(page([{ id: 1 }], cursor));
+  await expect(new AutotaskService(config, logger).searchTickets({ page: 2, pageSize: 1 }))
+    .rejects.toThrow('repeated pagination cursor');
+  expect(spy).toHaveBeenCalledTimes(1);
+});
+
+test('strict identity lookup rejects a cursor back to its initial query', async () => {
+  const spy = jest.spyOn(globalThis, 'fetch').mockResolvedValue(page([{ id: 1 }], '/Companies/query'));
+  await expect(client().query('Companies', [], { maxRecords: 2, strictPagination: true, maxPages: 5 }))
+    .rejects.toThrow('repeated pagination cursor');
+  expect(spy).toHaveBeenCalledTimes(1);
+});
